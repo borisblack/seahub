@@ -124,6 +124,7 @@ MIDDLEWARE_CLASSES = (
     'termsandconditions.middleware.TermsAndConditionsRedirectMiddleware',
     'seahub.two_factor.middleware.OTPMiddleware',
     'seahub.trusted_ip.middleware.LimitIpMiddleware',
+    'social_django.middleware.SocialAuthExceptionMiddleware',
 )
 
 
@@ -151,6 +152,9 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.messages.context_processors.messages',
 
+                'social_django.context_processors.backends',
+                'social_django.context_processors.login_redirect',
+
                 'seahub.auth.context_processors.auth',
                 'seahub.base.context_processors.base',
                 'seahub.base.context_processors.debug',
@@ -159,7 +163,8 @@ TEMPLATES = [
     },
 ]
 
-
+# django.utils.translation -- that module depends on the settings.
+gettext_noop = lambda s: s
 LANGUAGES = (
     # ('bg', gettext_noop(u'български език')),
     ('ca', u'Català'),
@@ -222,6 +227,7 @@ INSTALLED_APPS = (
     'post_office',
     'termsandconditions',
     'webpack_loader',
+    'social_django',
 
     'seahub.api2',
     'seahub.avatar',
@@ -259,8 +265,45 @@ CONSTANCE_BACKEND = 'constance.backends.database.DatabaseBackend'
 CONSTANCE_DATABASE_CACHE_BACKEND = 'default'
 
 AUTHENTICATION_BACKENDS = (
+    'social_core.backends.weixin.WeixinOAuth2',
+    'seahub.social_core.backends.weixin_enterprise.WeixinWorkOAuth2',
+    'seahub.social_core.backends.weixin_enterprise.WeixinWorkOAuth2APP',
+
     'seahub.base.accounts.AuthBackend',
     'seahub.oauth.backends.OauthRemoteUserBackend',
+)
+
+SOCIAL_AUTH_URL_NAMESPACE = 'social'
+SOCIAL_AUTH_VERIFY_SSL = True
+SOCIAL_AUTH_METHODS = (
+    ('weixin', gettext_noop('WeChat')),
+)
+
+SOCIAL_AUTH_WEIXIN_KEY = ''
+SOCIAL_AUTH_WEIXIN_SECRET = ''
+
+SOCIAL_AUTH_WEIXIN_WORK_AGENTID = ''
+SOCIAL_AUTH_WEIXIN_WORK_KEY = ''
+SOCIAL_AUTH_WEIXIN_WORK_SECRET = ''
+
+SOCIAL_AUTH_WEIXIN_WORK_APP_AGENTID = ''
+SOCIAL_AUTH_WEIXIN_WORK_APP_KEY = ''
+SOCIAL_AUTH_WEIXIN_WORK_APP_SECRET = ''
+
+SOCIAL_AUTH_PIPELINE = (
+    'social_core.pipeline.social_auth.social_details',
+    'social_core.pipeline.social_auth.social_uid',
+    'social_core.pipeline.social_auth.auth_allowed',
+
+    'seahub.social_core.pipeline.social_auth.social_user',
+    'seahub.social_core.pipeline.user.get_username',
+    'seahub.social_core.pipeline.user.create_user',
+    'seahub.social_core.pipeline.social_auth.associate_user',
+
+    'social_core.pipeline.social_auth.load_extra_data',
+    # 'social_core.pipeline.user.user_details',
+
+    'seahub.social_core.pipeline.user.save_profile',
 )
 
 ENABLE_OAUTH = False
@@ -269,7 +312,7 @@ ENABLE_WATERMARK = False
 # allow user to clean library trash
 ENABLE_USER_CLEAN_TRASH = True
 
-LOGIN_REDIRECT_URL = '/profile/'
+LOGIN_REDIRECT_URL = '/'
 LOGIN_URL = '/accounts/login/'
 LOGOUT_URL = '/accounts/logout/'
 LOGOUT_REDIRECT_URL = None
