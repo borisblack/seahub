@@ -2,7 +2,7 @@
 import os
 from django.template import Context, loader
 from post_office import mail
-from post_office.models import PRIORITY
+from post_office.models import PRIORITY, STATUS
 from constance import config
 
 from seahub.utils import get_site_scheme_and_netloc, get_site_name
@@ -42,7 +42,10 @@ def send_html_email_with_dj_template(recipients, subject, dj_template,
     t = loader.get_template(dj_template)
     html_message = t.render(context)
 
-    mail.send(recipients, sender=sender, template=template, context=context,
+    m = mail.send(recipients, sender=sender, template=template, context=context,
               subject=subject, message=message,
               html_message=html_message, headers=headers, priority=priority,
               backend=backend)
+
+    if m.status == STATUS.failed:
+        raise Exception('Failed to send email!')

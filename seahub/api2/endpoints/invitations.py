@@ -1,4 +1,5 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
+import logging
 
 from django.utils.translation import ugettext as _
 from rest_framework import status
@@ -15,6 +16,8 @@ from seahub.base.accounts import User
 from seahub.utils import is_valid_email
 from seahub.invitations.models import Invitation
 from seahub.invitations.utils import block_accepter
+
+logger = logging.getLogger(__name__)
 
 json_content_type = 'application/json; charset=utf-8'
 
@@ -69,9 +72,13 @@ class InvitationsView(APIView):
 
         i = Invitation.objects.add(inviter=request.user.username,
                                    accepter=accepter)
-        i.send_to(email=accepter)
 
-        return Response(i.to_dict(), status=201)
+        try:
+            i.send_to(email=accepter)
+            return Response(i.to_dict(), status=201)
+        except Exception as e:
+            logger.error(e)
+            return Response('Failed to send email', status=500)
 
 
 class InvitationsBatchView(APIView):
