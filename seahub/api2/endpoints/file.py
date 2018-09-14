@@ -22,6 +22,7 @@ from seahub.utils import check_filename_with_rename, is_pro_version, \
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 from seahub.views import check_folder_permission
 from seahub.utils.file_op import check_file_lock, if_locked_by_online_office
+from seahub.utils.repo import parse_repo_perm
 
 from seahub.settings import MAX_UPLOAD_FILE_NAME_LEN, \
     FILE_LOCK_EXPIRATION_DAYS, OFFICE_TEMPLATE_ROOT
@@ -396,7 +397,9 @@ class FileView(APIView):
             # permission check for source file
             src_repo_id = repo_id
             src_dir = os.path.dirname(path)
-            if not check_folder_permission(request, src_repo_id, src_dir):
+
+            if parse_repo_perm(check_folder_permission(
+                            request, src_repo_id, src_dir)).can_copy is False:
                 error_msg = 'Permission denied.'
                 return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
