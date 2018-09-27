@@ -150,6 +150,13 @@ def sys_statistic_traffic(request):
     return render(request, 'sysadmin/sys_statistic_traffic.html', {
             })
 
+@login_required
+@sys_staff_required
+def sys_statistic_reports(request):
+
+    return render(request, 'sysadmin/sys_statistic_reports.html', {
+            })
+
 def can_view_sys_admin_repo(repo):
     default_repo_id = get_system_default_repo_id()
     is_default_repo = True if repo.id == default_repo_id else False
