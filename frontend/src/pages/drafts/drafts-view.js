@@ -140,7 +140,7 @@ class DraftsView extends React.Component {
           <div className="cur-view-content" style={{padding: 0}}>
             {this.state.isLoadingDraft && <Loading /> }
             {(!this.state.isLoadingDraft && this.state.draftList.length !==0) &&
-              <ListView
+              <DraftListView
                 draftList={this.state.draftList} 
                 isItemFreezed={this.state.isItemFreezed}
                 onMenuToggleClick={this.onMenuToggleClick}
@@ -153,7 +153,7 @@ class DraftsView extends React.Component {
               </div>
             }
             {this.state.isMenuShow && 
-              <ListMenu 
+              <DraftListMenu 
                 isMenuShow={this.state.isMenuShow} 
                 currentDraft={this.state.currentDraft} 
                 menuPosition={this.state.menuPosition} 
