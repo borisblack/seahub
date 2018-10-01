@@ -146,8 +146,8 @@ class  MainSideNav extends React.Component {
 
           <h3 className="sf-heading">Tools</h3>
           <ul className="side-tabnav-tabs">
-            <li className={`tab ${this.state.currentTab === 'favorites' ? 'tab-cur' : ''}`}>
-              <a href={siteRoot + '#starred/'} title={gettext('Favorites')} onClick={() => this.tabItemClick('favorites')}>
+            <li className={`tab ${this.state.currentTab === 'starred' ? 'tab-cur' : ''}`}>
+              <a href={siteRoot + 'starred/'} title={gettext('Favorites')} onClick={() => this.tabItemClick('favorites')}>
                 <span className="sf2-icon-star" aria-hidden="true"></span>
                 {gettext('Favorites')}
               </a>
