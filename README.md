@@ -53,11 +53,11 @@ Request parameters and response format are the same as in [Seafile Pro](https://
 
 ### User tags
 
-#### GET `api/v2.1/tags/`
+#### GET `/api/v2.1/tags/`
 
 Returns all files and folders tags, available for user.
 
-#### GET `api/v2.1/tags/{name}/`
+#### GET `/api/v2.1/tags/{name}/`
 
 Returns all files and folders, tagged by `{name}` tag.
 

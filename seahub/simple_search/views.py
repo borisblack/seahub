@@ -4,6 +4,7 @@ from django.utils.translation import ugettext as _
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.base import APIView
@@ -398,4 +399,4 @@ class SimpleSearch(APIView):
 
         has_more = True if total > current_page * per_page else False
 
-        return Response({ "total": total, "results": results, "has_more": has_more })
+        return Response({"total": total, "results": results, "has_more": has_more})
