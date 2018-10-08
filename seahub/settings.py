@@ -40,7 +40,7 @@ TIME_ZONE = 'UTC'
 
 # Language code for this installation. All choices can be found here:
 # http://www.i18nguy.com/unicode/language-identifiers.html
-LANGUAGE_CODE = 'en'
+LANGUAGE_CODE = 'ru'
 
 SITE_ID = 1
 
@@ -245,6 +245,7 @@ INSTALLED_APPS = (
     'seahub.revision_tag',
     'seahub.two_factor',
     'seahub.role_permissions',
+    'seahub.simple_search',
     'seahub.trusted_ip',
 )
 
@@ -829,3 +830,10 @@ CONSTANCE_CONFIG = {
     'ENABLE_TERMS_AND_CONDITIONS': (ENABLE_TERMS_AND_CONDITIONS, ''),
     'ENABLE_USER_CLEAN_TRASH': (ENABLE_USER_CLEAN_TRASH, ''),
 }
+
+# Enable Only Office
+# ENABLE_ONLYOFFICE = True
+# VERIFY_ONLYOFFICE_CERTIFICATE = False
+# ONLYOFFICE_APIJS_URL = 'http://127.0.0.1:88/web-apps/apps/api/documents/api.js'
+# ONLYOFFICE_FILE_EXTENSION = ('doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'fodt', 'odp', 'fodp', 'ods', 'fods')
+# ONLYOFFICE_EDIT_FILE_EXTENSION = ('docx', 'pptx', 'xlsx')

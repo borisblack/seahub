@@ -118,6 +118,8 @@ from seahub.api2.endpoints.admin.address_book.groups import AdminAddressBookGrou
 from seahub.api2.endpoints.admin.group_owned_libraries import AdminGroupOwnedLibraries, \
         AdminGroupOwnedLibrary
 
+from seahub.tags.views import TagsView
+
 urlpatterns = [
     url(r'^accounts/', include('seahub.base.registration_urls')),
 
@@ -535,6 +537,11 @@ if HAS_FILE_SEARCH:
         url(r'^search/$', search, name='search'),
         url(r'^pubinfo/users/search/$', pubuser_search, name='pubuser_search'),
     ]
+else:
+    from seahub.simple_search.views import simple_search
+    urlpatterns += [
+        url(r'^simple-search/$', simple_search, name='simple_search')
+    ]
 
 if getattr(settings, 'ENABLE_PAYMENT', False):
     urlpatterns += [
@@ -636,3 +643,8 @@ if getattr(settings, 'ENABLE_CAS', False):
         url(r'^accounts/cas-logout/$', cas_logout, name='cas_ng_logout'),
         url(r'^accounts/cas-callback/$', cas_callback, name='cas_ng_proxy_callback'),
     ]
+
+urlpatterns += [
+    url(r'^api/v2.1/tags/$', TagsView.as_view(), name='api-v2.1-tags'),
+    url(r'^api/v2.1/tags/(?P<name>.*?)/$', TagsView.as_view(), name='api-v2.1-tag'),
+]

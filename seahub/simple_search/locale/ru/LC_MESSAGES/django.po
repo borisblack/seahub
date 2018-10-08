@@ -1,0 +1,40 @@
+#, fuzzy
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Invalid start date, should be dd.mm.yyyyy"
+msgstr "Неверная дата начала, должна быть dd.mm.yyyy"
+
+msgid "Invalid end date, should be dd.mm.yyyy"
+msgstr "Неверная дата окончания, должна быть dd.mm.yyyy"
+
+msgid "Search Files"
+msgstr "Поиск файлов"
+
+msgid "advanced"
+msgstr "дополнительно"
+
+msgid "No result found"
+msgstr "Ничего не найдено"
+
+#, python-format
+msgid "%(total)s result"
+msgid_plural "%(total)s results"
+msgstr[0] "1 элемент"
+msgstr[1] "%(total)s элемента"
+msgstr[2] "%(total)s элементов"
+
+msgid "File"
+msgstr "Файл"
+
+msgid "Previous"
+msgstr "Предыдущая"
+
+msgid "Next"
+msgstr "Следующая"
+
+msgid "Per page: "
+msgstr "Записей на странице： "

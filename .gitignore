@@ -44,10 +44,13 @@ seahub/thumbnail/thumb/*
 .dumbjump
 .projectile
 .pytest_cache/
-tags
 
 frontend/webpack-stats.dev.json
 frontend/node_modules
 frontend/package-lock.json
 
 /.idea
+
+/*.env
+collectstatic.sh
+optimize-js.sh

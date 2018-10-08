@@ -1,0 +1,14 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ru\n"
+
+msgid "Tag"
+msgstr "Тег"
+
+msgid "You don't have any tags yet"
+msgstr "Список тегов пуст"
+
+msgid "You can tag any file in Details pane. Tags will be listed here."
+msgstr "Вы можете добавить теги к любому файлу/папке в панели действий. Теги появятся в этом списке."

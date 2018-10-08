@@ -163,6 +163,15 @@ class FileTagManager(models.Manager):
 
 
 ########## Model
+class Tags(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    objects = TagsManager()
+
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name}
+
+
 class FileUUIDMap(models.Model):
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4)
     repo_id = models.CharField(max_length=36, db_index=True)
@@ -170,6 +179,7 @@ class FileUUIDMap(models.Model):
     parent_path = models.TextField()
     filename = models.CharField(max_length=1024)
     is_dir = models.BooleanField()
+    tags = models.ManyToManyField(Tags, through='FileTag', through_fields=('uuid', 'tag'))
     objects = FileUUIDMapManager()
 
     @classmethod
@@ -188,12 +198,6 @@ class FileUUIDMap(models.Model):
                 self.repo_id, self.parent_path)
 
         super(FileUUIDMap, self).save(*args, **kwargs)
-
-
-class Tags(models.Model):
-    name = models.CharField(max_length=255, unique=True)
-
-    objects = TagsManager()
 
 
 class FileTag(models.Model):

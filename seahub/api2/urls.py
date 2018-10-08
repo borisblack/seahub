@@ -17,6 +17,7 @@ from .endpoints.group_discussions import GroupDiscussions
 from .endpoints.group_discussion import GroupDiscussion
 from .endpoints.send_share_link_email import SendShareLinkView
 from .endpoints.send_upload_link_email import SendUploadLinkView
+from seahub.simple_search.views import SimpleSearch
 
 urlpatterns = [
     url(r'^ping/$', Ping.as_view()),
@@ -124,3 +125,7 @@ if HAS_OFFICE_CONVERTER:
     urlpatterns += [
         url(r'^office-convert/generate/repos/(?P<repo_id>[-0-9-a-f]{36})/$', OfficeGenerateView.as_view()),
     ]
+
+urlpatterns += [
+    url(r'^simple-search/$', SimpleSearch.as_view(), name='api_simple_search'),
+]

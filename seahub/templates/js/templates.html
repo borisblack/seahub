@@ -1,7 +1,7 @@
 {% load avatar_tags i18n %}
 
 <script type="text/template" id="my-repos-toolbar-tmpl">
-    <button class="repo-create btn-white hidden-sm-down repo-create-btn"><span aria-hidden="true" class="icon-plus-square add vam"></span><span class="vam">{% trans "New Library" %}</span></button>
+    <button class="repo-create btn-white hidden-sm-down"><span aria-hidden="true" class="icon-plus-square add vam"></span><span class="vam">{% trans "New Library" %}</span></button>
     <span aria-label="{% trans "New Library" %}" class="hidden-md-up repo-create sf2-icon-plus2 mobile-icon"></span>
     <div id="my-libs-more-op" class="sf-dropdown sf-dropdown-inline hidden-sm-down">
         <button class="sf-dropdown-toggle btn-white more-op-btn-white">{% trans "More" %}</button>
@@ -495,11 +495,7 @@
     </div><!-- div#cur-dir-ops ends here -->
 
     <div class="switch-mode hidden-sm-down">
-        <button class="view-btn list-view-icon-btn sf2-icon-list-view <% if (mode == 'list') { %>active<% } %>" title="{% trans "List" %}" id="js-switch-list-view" aria-label="{% trans "list view" %}"></button>
-        <button class="view-btn grid-view-icon-btn sf2-icon-grid-view <% if (mode == 'grid') { %>active<% } %>" title="{% trans "Grid" %}" id="js-switch-grid-view" aria-label="{% trans "grid view" %}"></button>
-        <% if (app.pageOptions.enable_repo_wiki_mode) { %> 
-        <button class="view-btn wiki-view-icon-btn sf2-icon-wiki-view <% if (mode == 'wiki') { %>active<% } %>" title="{% trans "Wiki" %}" id="js-switch-wiki-view" aria-label="{% trans "Wiki view" %}"></button>
-        <% } %>
+        <button class="list-view-icon-btn sf2-icon-list-view <% if (mode == 'list') { %>active<% } %>" title="{% trans "List" %}" id="js-switch-list-view" aria-label="{% trans "list view" %}"></button><button class="grid-view-icon-btn sf2-icon-grid-view <% if (mode == 'grid') { %>active<% } %>" title="{% trans "Grid" %}" id="js-switch-grid-view" aria-label="{% trans "grid view" %}"></button>
     </div>
 </script>
 <script type="text/template" id="dir-view-toolbar2-tmpl">
@@ -771,7 +767,6 @@
                             <li><a class="op lock-file" href="#">{% trans "Lock" %}</a></li>
                             <% } %>
                         <% } %>
-                        <li><a class="op new-draft" href="#">{% trans "New Draft" %}</a></li>
                     </ul>
                     <div class="menu-inner-divider"></div>
                     <ul>
@@ -903,7 +898,6 @@
                     <li><a class="op cp" href="#">{% trans "Copy" %}</a></li>
                     <% } %>
                 <% } %>
-                <li><a class="op new-draft" href="#">{% trans "New Draft" %}</a></li>
                 </ul>
                 <!-- <div class="menu-inner-divider"></div> -->
                 <ul>
@@ -1246,11 +1240,11 @@
                             <input type="radio" name="permission" value="preview_download" checked="checked" class="vam" />
                             <span class="vam">{% trans "Preview and download" %}</span>
                         </label><br />
-                        <label id="share-link-preview-only-radio" class="radio-item">
+                        <label id="file-share-link-preview-only-radio" class="radio-item hide">
                             <input type="radio" name="permission" value="preview_only" class="vam" />
                             <span class="vam">{% trans "Preview only" %}</span>
                         </label><br />
-                        <label id="share-link-edit-download-radio" class="radio-item hide">
+                        <label id="file-share-link-edit-download-radio" class="radio-item hide">
                             <input type="radio" name="permission" value="edit_download" class="vam" />
                             <span class="vam">{% trans "Edit on cloud and download" %}</span>
                         </label>
@@ -1435,7 +1429,7 @@
     </td>
     <td><%= size_formatted %></td>
     <td><%= mtime_relative %></td>
-    <td><span title="<%- owner_name_shown %>"><%- owner_name_shown %></span></td>
+    <td><span title="<%- owner_nickname %>"><%- owner_nickname %></span></td>
 </script>
 <script type="text/template" id="shared-repo-mobile-tmpl">
     <td>
@@ -1443,7 +1437,7 @@
     </td>
     <td>
         <a href="#shared-libs/lib/<%= id %>" class="normal"><%- name %></a><br />
-        <span class="repo-meta-info" title="<%- owner_name_shown %>"><%- owner_name_shown %></span>
+        <span class="repo-meta-info" title="<%- owner %>"><%- owner_nickname %></span>
         <span class="repo-meta-info"><%= size_formatted %></span>
         <span class="repo-meta-info"><%= mtime_relative %></span>
     </td>
@@ -1528,7 +1522,7 @@
         </li>
         {% if events_enabled %}
         <li class="tab<% if (cur_tab == 'activities') { %> tab-cur<% } %>">
-            <a href="{{ SITE_ROOT }}dashboard/"><span aria-hidden="true" class="sf2-icon-clock"></span>{% trans "Activities" %}</a>
+            <a href="{{ SITE_ROOT }}#activities/"><span aria-hidden="true" class="sf2-icon-clock"></span>{% trans "Activities" %}</a>
         </li>
         {% endif %}
 
@@ -1549,10 +1543,6 @@
             <a href="{{ SITE_ROOT }}#invitations/"><span aria-hidden="true" class="sf2-icon-invite"></span>{% trans "Invite People" %}</a>
         </li>
         {% endif %}
-
-        <li class="tab<% if (cur_tab == 'drafts') { %> tab-cur<% } %>">
-            <a href="{{ SITE_ROOT }}drafts/" class="ellipsis" title="{% trans "Drafts" %}"><span aria-hidden="true" class="sf2-icon-draft"></span>{% trans "Drafts" %}</a>
-        </li>
 
         <li class="tab" id="share-admin-nav">
             <a href="#" class="ellipsis" title="{% trans "Share Admin" %}"><span class="toggle-icon <% if (show_share_admin) { %> icon-caret-down <% } else { %> icon-caret-left <% } %> fright" aria-hidden="true"></span><span aria-hidden="true" class="sf2-icon-wrench"></span>{% trans "Share Admin" %}</a>
@@ -1580,6 +1570,8 @@
                 <% } %>
             </ul>
         </li>
+
+        {% include 'tags/menu_item.html' %}
     </ul>
     </div>
     <div class="side-nav-footer" role="contentinfo">
@@ -2862,3 +2854,5 @@
         </div>
     </div>
 </script>
+
+{% include 'tags/js/templates.html' %}

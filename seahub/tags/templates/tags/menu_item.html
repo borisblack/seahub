@@ -1,0 +1,6 @@
+{% load i18n %}
+
+<li class="tab<% if (cur_tab == 'tags') { %> tab-cur<% } %>">
+    <a href="{{ SITE_ROOT }}#tags/"><span class="icon-tags" aria-hidden="true"></span>{% trans "Tags" %}</a>
+{#    <a href="{{ SITE_ROOT }}#tags/"><span class="sf2-icon-link" aria-hidden="true"></span>{% trans "Tags" %}</a>#}
+</li>

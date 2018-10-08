@@ -59,6 +59,8 @@
  *
  */
 
+@import url(tags.css);
+
 /****** icon-xx ********/
 /* Font Awesome 3.2.1 by Dave Gandy - http://fortawesome.github.com/Font-Awesome */
 @font-face {
@@ -162,12 +164,12 @@
 .sf2-icon-organization:before { content:"\e010"; }
 .sf2-icon-share:before { content:"\e011"; }
 .sf2-icon-star:before { content:"\e012"; }
+.sf2-icon-wiki:before { content:"\e013"; }
 .sf2-icon-history:before { content:"\e014"; }
 .sf2-icon-cog1:before { content:"\e015"; }
 .sf2-icon-trash:before { content:"\e016"; }
 .sf2-icon-security:before { content:"\e017"; }
 .sf2-icon-edit:before { content:"\e018"; }
-.sf2-icon-draft:before { content:"\e018"; }
 .sf2-icon-edit2:before { content:"\e018"; } /* for some reason */
 .sf2-icon-eye:before { content:"\e019"; }
 .sf2-icon-caret-down:before { content:"\e01a"; }
@@ -180,11 +182,9 @@
 .sf2-icon-msgs2:before { content:"\e021"; }
 /*.sf2-icon-group-settings:before { content:"\e022"; }*/
 .sf2-icon-comment:before { content:"\e023"; }
-.sf2-icon-wiki:before { content:"\e013"; }
 .sf2-icon-wiki2:before { content:"\e024"; }
 .sf2-icon-grid-view:before { content:"\e025"; }
 .sf2-icon-list-view:before { content:"\e026"; }
-.sf2-icon-wiki-view:before { content:"\e013"; }
 .sf2-icon-plus:before { content: "\e027"; }
 .sf2-icon-copy:before { content: "\e028"; }
 .sf2-icon-move:before { content: "\e029"; }
@@ -214,8 +214,7 @@ form,input,textarea,select,button,img {
     margin:0;
 }
 body, input, textarea, button, select {
-    font-size: 13px;
-    line-height: 1.5;
+    font: 13px/1.5 Arial, Helvetica, sans-serif;
     color: #333;
     word-wrap:break-word;
 }
@@ -1293,7 +1292,7 @@ textarea:-moz-placeholder {/* for FF */
 }
 .new-narrow-panel .con {
     padding:30px 0 60px;
-    width:268px;
+    width:268px; 
     margin:0 auto;
 }
 .new-narrow-panel .input {
@@ -1858,7 +1857,7 @@ button.sf-dropdown-toggle:focus {
 }
 /**** custom magnificPopup ****/
 .mfp-bottom-bar {
-    position:relative; 
+    position:relative;
 }
 .mfp-title {
     min-width:230px;
@@ -1914,8 +1913,7 @@ button.sf-dropdown-toggle:focus {
     flex-direction:column;
 }
 .panel-top {
-    padding:.6rem 1rem .25rem;
-    height: 49px;
+    padding:.5rem 1rem .25rem;
     background:#f4f4f7;
     border-bottom: 1px solid #e8e8e8;
     display:flex;
@@ -1932,10 +1930,6 @@ button.sf-dropdown-toggle:focus {
 @media (min-width: 768px) {
     .cur-view-toolbar {
         position:relative; /* for the ':before' */
-        display: flex;
-    }
-    .repo-create-btn {
-        margin-right: 4px;
     }
     .cur-view-toolbar:before {
         content:'';
@@ -2074,9 +2068,6 @@ button.sf-dropdown-toggle:focus {
     background:#fff;
     line-height:17px;
 }
-.btn-white {
-    height: 30px;
-}
 .cur-view-toolbar .btn-white {
     min-width: 55px;
 }
@@ -2124,18 +2115,8 @@ button.sf-dropdown-toggle:focus {
 
 #notifications {
     position:relative;
-    width: 32px;
-    height: 32px;
-    margin-left: 8px;
+    margin:5px 0 0 25px;
 }
-
-#notifications #notice-icon {
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
 @media (max-width: 390px) {
     #notifications {
         margin-left:8px;
@@ -2199,7 +2180,7 @@ button.sf-dropdown-toggle:focus {
 }
 #account {
     position:relative;
-    margin-left: 8px;
+    margin-left:32px;
 }
 #account .avatar {
     vertical-align:middle;
@@ -2494,7 +2475,7 @@ button.sf-dropdown-toggle:focus {
 }
 .es #user-basic-info label,
 .hu #user-basic-info label {
-    width:7.5em;
+    width:7em;
 }
 .it #user-basic-info label {
     width:6em;
@@ -3074,22 +3055,11 @@ button.sf-dropdown-toggle:focus {
     padding:0;
 }
 #file-view-tip {
-    min-height:130px;
+    height:130px;
     padding:30px 10px 10px;
     width:950px;
     background:#fff;
     text-align:center;
-}
-#file-view-tip .open-via-client { /* for the text link */
-    display:block;
-    margin-top:25px;
-    color:#333;
-    font-weight:normal;
-    text-decoration:underline;
-}
-#file-view-op .open-via-client { /* for the button */
-    padding-top:6px;
-    padding-bottom:4px;
 }
 @media (max-width:991.98px) {
     #file-view-tip {
@@ -3928,7 +3898,7 @@ button.sf-dropdown-toggle:focus {
     color: #999;
 }
 .shared-link-copy-icon:hover {
-    cursor: pointer;
+    cursor: pointer; 
     color: #333;
 }
 
@@ -4182,9 +4152,7 @@ img.thumbnail {
 /* view mode */
 .switch-mode {
     margin-left:15px;
-    font-size: 0;
 }
-.wiki-view-icon-btn,
 .grid-view-icon-btn,
 .list-view-icon-btn {
     display:inline-block;
@@ -4196,26 +4164,12 @@ img.thumbnail {
     color:#aaa;
     cursor:pointer;
     border-radius:0;
-    margin-left: -1px;
 }
-
-.list-view-icon-btn {
-    margin-left: 0;
-}
-
-.wiki-view-icon-btn.active,
 .grid-view-icon-btn.active,
 .list-view-icon-btn.active {
     color:#fff;
     background:#ccc;
     cursor:default;
-}
-
-.view-btn:hover,
-.view-btn:focus,
-.view-btn:active {
-    position: relative;
-    z-index: 1;
 }
 /* grid view */
 .grid-item {
