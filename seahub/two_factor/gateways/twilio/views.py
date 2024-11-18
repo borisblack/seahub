@@ -3,7 +3,7 @@ from django.conf import settings
 from django.contrib.sites.shortcuts import get_current_site
 from django.http import HttpResponse
 from django.utils import translation
-from django.utils.translation import (gettext_lazy as _, pgettext,
+from django.utils.translation import (ugettext_lazy as _, pgettext,
                                       check_for_language)
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
@@ -57,7 +57,7 @@ class TwilioCallApp(View):
     def create_response(self, template):
         with translation.override(self.get_locale()):
             prompt_context = self.get_prompt_context()
-            template_context = dict((k, v % prompt_context) for k, v in list(self.prompts.items()))
+            template_context = dict((k, v % prompt_context) for k, v in self.prompts.items())
             template_context['locale'] = self.get_twilio_locale()
             return HttpResponse(template % template_context, 'text/xml')
 

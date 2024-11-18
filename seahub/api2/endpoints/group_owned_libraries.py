@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 from seaserv import seafile_api, ccnet_api
 
@@ -24,35 +24,24 @@ from seahub.api2.endpoints.utils import (
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
 from seahub.base.accounts import User
-from seahub.organizations.models import OrgAdminSettings, DISABLE_ORG_ENCRYPTED_LIBRARY
-from seahub.organizations.views import org_user_exists
 from seahub.signals import repo_created
-from seahub.group.utils import is_group_admin, is_group_member
+from seahub.group.utils import is_group_admin
 from seahub.utils import is_valid_dirent_name, is_org_context, \
         is_pro_version, normalize_dir_path, is_valid_username, \
-        send_perm_audit_msg, is_valid_org_id, transfer_repo
-from seahub.utils.repo import (
-    get_library_storages, get_repo_owner, get_available_repo_perms
-)
+        send_perm_audit_msg, is_valid_org_id
+from seahub.utils.repo import get_library_storages, get_repo_owner
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 from seahub.utils.rpc import SeafileAPI
 from seahub.share.signals import share_repo_to_user_successful, share_repo_to_group_successful
 from seahub.share.utils import share_dir_to_user, share_dir_to_group, update_user_dir_permission, \
         check_user_share_out_permission, update_group_dir_permission, \
-        check_group_share_out_permission, check_user_share_in_permission, \
-        normalize_custom_permission_name
-from seahub.share.models import FileShare, UploadLinkShare
-
-from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, \
-        PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT
+        check_group_share_out_permission, check_user_share_in_permission
+from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE
 from seahub.views import check_folder_permission
 
-from seahub.settings import ENABLE_STORAGE_CLASSES, STORAGE_CLASS_MAPPING_POLICY, \
-        ENCRYPTED_LIBRARY_VERSION, ENCRYPTED_LIBRARY_PWD_HASH_ALGO, \
-        ENCRYPTED_LIBRARY_PWD_HASH_PARAMS
+from seahub.settings import ENABLE_STORAGE_CLASSES, STORAGE_CLASS_MAPPING_POLICY
 
 logger = logging.getLogger(__name__)
-
 
 def get_group_owned_repo_info(request, repo_id):
 
@@ -78,7 +67,6 @@ def get_group_owned_repo_info(request, repo_id):
         repo_info['group_name'] = ''
 
     return repo_info
-
 
 class GroupOwnedLibraries(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -107,12 +95,6 @@ class GroupOwnedLibraries(APIView):
             error_msg = 'NOT allow to create encrypted library.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
-        if org_id and org_id > 0:
-            disable_encrypted_library = OrgAdminSettings.objects.filter(org_id=org_id, key=DISABLE_ORG_ENCRYPTED_LIBRARY).first()
-            if (disable_encrypted_library is not None) and int(disable_encrypted_library.value):
-                return None, api_error(status.HTTP_403_FORBIDDEN,
-                                       'NOT allow to create encrypted library.')
-
         permission = request.data.get('permission', PERMISSION_READ_WRITE)
         if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
             error_msg = 'permission invalid.'
@@ -137,7 +119,8 @@ class GroupOwnedLibraries(APIView):
         group_id = int(group_id)
         if is_pro_version() and ENABLE_STORAGE_CLASSES:
 
-            if STORAGE_CLASS_MAPPING_POLICY in ('USER_SELECT', 'ROLE_BASED'):
+            if STORAGE_CLASS_MAPPING_POLICY in ('USER_SELECT',
+                    'ROLE_BASED'):
 
                 storages = get_library_storages(request)
                 storage_id = request.data.get("storage_id", None)
@@ -145,14 +128,8 @@ class GroupOwnedLibraries(APIView):
                     error_msg = 'storage_id invalid.'
                     return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-                repo_id = seafile_api.add_group_owned_repo(group_id,
-                                                           repo_name,
-                                                           permission,
-                                                           password,
-                                                           enc_version=ENCRYPTED_LIBRARY_VERSION,
-                                                           pwd_hash_algo=ENCRYPTED_LIBRARY_PWD_HASH_ALGO or None,
-                                                           pwd_hash_params=ENCRYPTED_LIBRARY_PWD_HASH_PARAMS or None,
-                                                           storage_id=storage_id)
+                repo_id = seafile_api.add_group_owned_repo(group_id, repo_name,
+                        password, permission, storage_id)
             else:
                 # STORAGE_CLASS_MAPPING_POLICY == 'REPO_ID_MAPPING'
                 repo_id = SeafileAPI.add_group_owned_repo(
@@ -165,20 +142,18 @@ class GroupOwnedLibraries(APIView):
         username = request.user.username
         library_template = request.data.get("library_template", '')
         repo_created.send(sender=None, org_id=org_id, creator=username,
-                          repo_id=repo_id, repo_name=repo_name,
-                          library_template=library_template)
+                repo_id=repo_id, repo_name=repo_name,
+                library_template=library_template)
 
         # for notification
         repo = seafile_api.get_repo(repo_id)
         share_repo_to_group_successful.send(sender=None, from_user=username,
-                                            group_id=group_id, repo=repo,
-                                            path='/', org_id=org_id)
+                group_id=group_id, repo=repo, path='/', org_id=org_id)
 
         info = get_group_owned_repo_info(request, repo_id)
         # TODO
         info['permission'] = permission
         return Response(info)
-
 
 class GroupOwnedLibrary(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -217,8 +192,9 @@ class GroupOwnedLibrary(APIView):
 
         # rename repo
         try:
+            repo_owner = get_repo_owner(request, repo_id)
             # desc is ''
-            seafile_api.edit_repo(repo_id, new_repo_name, '', username)
+            seafile_api.edit_repo(repo_id, new_repo_name, '', repo_owner)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -260,7 +236,6 @@ class GroupOwnedLibrary(APIView):
 def get_group_id_by_repo_owner(repo_owner):
 
     return int(repo_owner.split('@')[0])
-
 
 class GroupOwnedLibraryUserFolderPermission(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -337,11 +312,9 @@ class GroupOwnedLibraryUserFolderPermission(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         perm = request.data.get('permission', None)
-        if not perm or perm not in get_available_repo_perms():
-            perm = normalize_custom_permission_name(perm)
-            if not perm:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not perm or perm not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -393,7 +366,7 @@ class GroupOwnedLibraryUserFolderPermission(APIView):
             if permission:
                 result['failed'].append({
                     'user_email': user,
-                    'error_msg': _('Permission already exists.')
+                    'error_msg': _(u'Permission already exists.')
                 })
                 continue
 
@@ -432,11 +405,9 @@ class GroupOwnedLibraryUserFolderPermission(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         perm = request.data.get('permission', None)
-        if not perm or perm not in get_available_repo_perms():
-            perm = normalize_custom_permission_name(perm)
-            if not perm:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not perm or perm not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -529,7 +500,7 @@ class GroupOwnedLibraryUserFolderPermission(APIView):
         try:
             seafile_api.rm_folder_user_perm(repo_id, path, user)
             send_perm_audit_msg('delete-repo-perm', username,
-                                user, repo_id, path, permission)
+                    user, repo_id, path, permission)
             return Response({'success': True})
         except Exception as e:
             logger.error(e)
@@ -614,11 +585,9 @@ class GroupOwnedLibraryGroupFolderPermission(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         perm = request.data.get('permission', None)
-        if not perm or perm not in get_available_repo_perms():
-            perm = normalize_custom_permission_name(perm)
-            if not perm:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not perm or perm not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -669,7 +638,7 @@ class GroupOwnedLibraryGroupFolderPermission(APIView):
             if permission:
                 result['failed'].append({
                     'group_id': group_id,
-                    'error_msg': _('Permission already exists.')
+                    'error_msg': _(u'Permission already exists.')
                 })
                 continue
 
@@ -704,11 +673,9 @@ class GroupOwnedLibraryGroupFolderPermission(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         perm = request.data.get('permission', None)
-        if not perm or perm not in get_available_repo_perms():
-            perm = normalize_custom_permission_name(perm)
-            if not perm:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not perm or perm not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         group_id = request.data.get('group_id')
         if not group_id:
@@ -906,12 +873,9 @@ class GroupOwnedLibraryUserShare(APIView):
 
         # parameter check
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE,
-                              PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT]:
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -947,7 +911,7 @@ class GroupOwnedLibraryUserShare(APIView):
             if not is_valid_username(to_user):
                 result['failed'].append({
                     'email': to_user,
-                    'error_msg': _('username invalid.')
+                    'error_msg': _(u'username invalid.')
                     })
                 continue
 
@@ -956,14 +920,14 @@ class GroupOwnedLibraryUserShare(APIView):
             except User.DoesNotExist:
                 result['failed'].append({
                     'email': to_user,
-                    'error_msg': _('User %s not found.') % to_user
+                    'error_msg': _(u'User %s not found.') % to_user
                     })
                 continue
 
             if self.has_shared_to_user(request, repo_id, path, to_user):
                 result['failed'].append({
                     'email': to_user,
-                    'error_msg': _('This item has been shared to %s.') % to_user
+                    'error_msg': _(u'This item has been shared to %s.') % to_user
                     })
                 continue
 
@@ -998,12 +962,11 @@ class GroupOwnedLibraryUserShare(APIView):
 
             # send a signal when sharing repo successful
             share_repo_to_user_successful.send(sender=None,
-                                               from_user=username, to_user=to_user,
-                                               repo=repo, path=path, org_id=org_id)
+                    from_user=username, to_user=to_user,
+                    repo=repo, path=path, org_id=org_id)
 
             send_perm_audit_msg('add-repo-perm',
-                                username, to_user,
-                                repo_id, path, permission)
+                    username, to_user, repo_id, path, permission)
 
         return Response(result)
 
@@ -1026,12 +989,9 @@ class GroupOwnedLibraryUserShare(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE,
-                              PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT]:
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -1184,12 +1144,9 @@ class GroupOwnedLibraryGroupShare(APIView):
 
         # parameter check
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE,
-                              PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT]:
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -1238,7 +1195,7 @@ class GroupOwnedLibraryGroupShare(APIView):
             if self.has_shared_to_group(request, repo_id, path, gid):
                 result['failed'].append({
                     'group_name': group.group_name,
-                    'error_msg': _('This item has been shared to %s.') % group.group_name
+                    'error_msg': _(u'This item has been shared to %s.') % group.group_name
                     })
                 continue
 
@@ -1250,11 +1207,8 @@ class GroupOwnedLibraryGroupShare(APIView):
             })
 
             share_repo_to_group_successful.send(sender=None,
-                                                from_user=username,
-                                                group_id=gid,
-                                                repo=repo,
-                                                path=path,
-                                                org_id=org_id)
+                    from_user=username, group_id=gid, repo=repo, path=path,
+                    org_id=org_id)
 
             send_perm_audit_msg('add-repo-perm', username, gid,
                                 repo_id, path, permission)
@@ -1282,12 +1236,9 @@ class GroupOwnedLibraryGroupShare(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE,
-                              PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT]:
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -1320,8 +1271,7 @@ class GroupOwnedLibraryGroupShare(APIView):
             repo_id, path, repo_owner, to_group_id, permission, org_id)
 
         send_perm_audit_msg('modify-repo-perm',
-                            username, to_group_id,
-                            repo_id, path, permission)
+                username, to_group_id, repo_id, path, permission)
 
         return Response({'success': True})
 
@@ -1350,11 +1300,6 @@ class GroupOwnedLibraryGroupShare(APIView):
         repo_owner = get_repo_owner(request, repo_id)
         group_id = get_group_id_by_repo_owner(repo_owner)
         if not is_group_admin(group_id, username):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        if '@seafile_group' in repo_owner and \
-                repo_owner.split('@')[0] == str(to_group_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -1406,125 +1351,6 @@ class GroupOwnedLibraryUserShareInLibrary(APIView):
 
         permission = check_user_share_in_permission(repo_id, username, is_org)
         send_perm_audit_msg('delete-repo-perm', repo_owner, username,
-                            repo_id, '/', permission)
+                repo_id, '/', permission)
 
         return Response({'success': True})
-
-
-class GroupOwnedLibraryTransferView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, IsProVersion)
-    throttle_classes = (UserRateThrottle,)
-
-    @api_check_group
-    @add_org_context
-    def put(self, request, group_id, repo_id, org_id):
-        """ Transfer a library.
-
-        Permission checking:
-        1. is group admin;
-        """
-        # argument check
-        new_owner = request.data.get('email', None)
-        is_share = request.data.get('reshare', False)
-        if not new_owner:
-            error_msg = 'Email invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        if '@seafile_group' not in new_owner:
-            error_msg = 'Email invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        new_group_id = int(new_owner.split('@')[0])
-        if new_group_id == int(group_id):
-            error_msg = 'Cannot transfer to its owner'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        
-        try:
-            new_group = ccnet_api.get_group(new_group_id)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        if not new_group:
-            error_msg = 'Group %d not found.' % group_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-        
-        if new_group.creator_name != 'system admin':
-            error_msg = 'Group %d invalid' % group_id
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        
-        username = request.user.username
-        if not is_group_member(new_group_id, username):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-            
-        if org_id:
-            org_id = int(org_id)
-            if not ccnet_api.get_org_by_id(org_id):
-                error_msg = 'Organization %s not found.' % org_id
-                return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        if org_id:
-            repo_owner = seafile_api.get_org_repo_owner(repo_id)
-        else:
-            repo_owner = seafile_api.get_repo_owner(repo_id)
-        cur_group_id = int(group_id)
-        
-        if not is_group_admin(cur_group_id, username):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)        
-
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-        
-        # preparation before transfer repo
-        pub_repos = []
-        if org_id:
-            # get all org pub repos
-            pub_repos = seafile_api.list_org_inner_pub_repos_by_owner(
-                    org_id, repo_owner)
-        else:
-            # get all pub repos
-            if not request.cloud_mode:
-                pub_repos = seafile_api.list_inner_pub_repos_by_owner(repo_owner)
-        # transfer repo
-        try:
-            transfer_repo(repo_id, new_owner, is_share, org_id)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        # reshare repo to links
-        try:
-            UploadLinkShare.objects.filter(username=repo_owner, repo_id=repo_id).update(username=new_owner)
-            FileShare.objects.filter(username=repo_owner, repo_id=repo_id).update(username=new_owner)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        # check if current repo is pub-repo
-        # if YES, reshare current repo to public
-        for pub_repo in pub_repos:
-            if repo_id != pub_repo.id:
-                continue
-
-            if org_id:
-                seafile_api.set_org_inner_pub_repo(org_id, repo_id,
-                        pub_repo.permission)
-            else:
-                seafile_api.add_inner_pub_repo(
-                        repo_id, pub_repo.permission)
-
-            break
-
-        return Response({'success': True})
-    

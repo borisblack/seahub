@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 from seaserv import seafile_api, ccnet_api
 
@@ -17,13 +17,12 @@ from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.utils import update_user_dir_permission, \
         update_group_dir_permission, share_dir_to_user, share_dir_to_group, \
         has_shared_to_user, has_shared_to_group, check_user_share_out_permission, \
-        check_group_share_out_permission, normalize_custom_permission_name
+        check_group_share_out_permission
 from seahub.share.signals import share_repo_to_user_successful, share_repo_to_group_successful
 
 from seahub.base.accounts import User
 from seahub.base.templatetags.seahub_tags import email2nickname
 from seahub.utils import is_valid_username, send_perm_audit_msg
-from seahub.utils.repo import get_available_repo_perms
 from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, \
         PERMISSION_ADMIN
 
@@ -79,9 +78,6 @@ class AdminShares(APIView):
         Permission checking:
         1. admin user.
         """
-
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         result = []
 
@@ -161,11 +157,11 @@ class AdminShares(APIView):
 
         # argument check
         permission = request.data.get('permission', None)
-        if not permission or permission not in get_available_repo_perms():
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not permission or permission not in (PERMISSION_READ, 
+                                                PERMISSION_READ_WRITE,
+                                                PERMISSION_ADMIN):
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         result = {}
         result['failed'] = []
@@ -182,7 +178,7 @@ class AdminShares(APIView):
                 if repo_owner == email:
                     result['failed'].append({
                         'user_email': email,
-                        'error_msg': _('User %s is already library owner.') % email
+                        'error_msg': _(u'User %s is already library owner.') % email
                         })
 
                     continue
@@ -208,7 +204,7 @@ class AdminShares(APIView):
                 if has_shared_to_user(repo.repo_id, path, email):
                     result['failed'].append({
                         'email': email,
-                        'error_msg': _('This item has been shared to %s.') % email
+                        'error_msg': _(u'This item has been shared to %s.') % email
                     })
                     continue
 
@@ -265,7 +261,7 @@ class AdminShares(APIView):
                 if has_shared_to_group(repo.repo_id, path, group_id):
                     result['failed'].append({
                         'group_name': group.group_name,
-                        'error_msg': _('This item has been shared to %s.') % group.group_name
+                        'error_msg': _(u'This item has been shared to %s.') % group.group_name
                         })
                     continue
 
@@ -310,11 +306,11 @@ class AdminShares(APIView):
 
         # argument check
         permission = request.data.get('permission', None)
-        if not permission or permission not in get_available_repo_perms():
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if not permission or permission not in (PERMISSION_READ, 
+                                                PERMISSION_READ_WRITE,
+                                                PERMISSION_ADMIN):
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         share_info = {}
         share_info['repo_id'] = repo.repo_id

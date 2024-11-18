@@ -1,0 +1,167 @@
+{% load avatar_tags i18n %}
+
+{# Tags #}
+<script type="text/template" id="tags-tmpl">
+<div class="cur-view-path">
+    <h3>{% trans "Tags" %}</h3>
+</div>
+<div class="cur-view-main-con">
+    <table class="hide">
+        <thead></thead>
+        <tbody></tbody>
+    </table>
+    <span class="loading-icon loading-tip"></span>
+    <div class="empty-tips hide">
+        <h2 class="alc">{% trans "You don't have any tags yet" %}</h2>
+        <p>{% blocktrans %}You can tag any file in Details pane. Tags will be listed here.{% endblocktrans %}</p>
+    </div>
+</div>
+</script>
+
+<script type="text/template" id="tags-thead-tmpl">
+    <tr>
+        <th width="5%"></th>
+        <th width="95%">{% trans "Name" %}</th>
+    </tr>
+</script>
+
+<script type="text/template" id="tag-item-tmpl">
+    <td class="alc">
+        <span class="icon-tag" aria-hidden="true"></span>
+    </td>
+    <td>
+        <a class="normal" href="#tags/<%= name %>"><%- name %></a>
+    </td>
+</script>
+
+{# Tagged items #}
+<script type="text/template" id="tagged-items-tmpl">
+<div class="cur-view-main">
+    <div class="cur-view-path">
+        <h3>
+            {% trans "Tag" %} <span class="label label-default"><%- tagName %></span>
+        </h3>
+    </div>
+    <div class="cur-view-main-con">
+        <span class="loading-icon loading-tip"></span>
+        <div class="js-dir-content hide">
+            <table class="tagged-item-list hide">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <p class="error hide"></p>
+    </div>
+</div>
+</script>
+
+<script type="text/template" id="tagged-items-thead-tmpl">
+    <tr>
+        <th width="5%" class="dirent-icon"></th>
+        <th width="60%"><a class="table-sort-op by-name" href="#"><span class="dirent-name">{% trans "Name"%} <span class="sort-icon icon-caret-up"></span></span></a></th>
+        <th width="15%" class="dirent-size">{% trans "Size"%}</th>
+        <th width="20%" class="dirent-update"><a class="table-sort-op by-time" href="#">{% trans "Last Update" %} <span class="sort-icon icon-caret-down hide" aria-hidden="true"></span></a></th>
+    </tr>
+</script>
+<script type="text/template" id="tagged-items-thead-mobile-tmpl">
+    <tr>
+        <th width="8%" class="dirent-icon"></th>
+        <th width="92%">
+            {% trans "Sort:"%}
+            <a class="table-sort-op mobile-table-sort-op by-name" href="#"><span class="dirent-name">{% trans "name"%} <span class="sort-icon icon-caret-up"></span></span></a>
+            <a class="table-sort-op mobile-table-sort-op by-time" href="#">{% trans "last update" %} <span class="sort-icon icon-caret-down hide" aria-hidden="true"></span></a>
+        </th>
+    </tr>
+</script>
+
+<script type="text/template" id="tagged-item-dir-tmpl">
+    <td class="dirent-icon"><img src="<%= icon_url %>" width="24" alt="" /></td>
+    <td>
+        <span class="dirent-name"><a href="<%= url %>" class="dir-link normal"><%- dirent.obj_name %></a></span>
+    </td>
+    <td class="dirent-size"></td>
+    <td class="dirent-update">
+        <% if (dirent.last_modified) { %>
+        <%= dirent.last_update %>
+        <% } %>
+    </td>
+</script>
+<script type="text/template" id="tagged-item-dir-mobile-tmpl">
+    <td class="dirent-icon"><img src="<%= icon_url %>" width="24" alt="" /></td>
+    <td>
+        <span class="dirent-name">
+        <a href="<%= url %>" class="dir-link normal"><%- dirent.obj_name %></a>
+        <br />
+        <% if (dirent.last_modified) { %>
+        <span class="dirent-meta-info"><%= dirent.last_update %></span>
+        <% } %>
+        </span>
+    </td>
+</script>
+
+<script type="text/template" id="tagged-item-file-tmpl">
+    <td class="dirent-icon">
+        <div class="pos-rel">
+        <% if (dirent.is_img || dirent.is_video) { %>
+            <% if (dirent.encoded_thumbnail_src) { %>
+            <img class="thumbnail" src="{{ SITE_ROOT }}<%- dirent.encoded_thumbnail_src %>" alt="" />
+            <% } else { %>
+            <img src="<%= icon_url %>" width="24" alt="" />
+            <% } %>
+        <% } else { %>
+        <img src="<%= icon_url %>" width="24" alt="" />
+        <% } %>
+        </div>
+    </td>
+    <td>
+        <span class="dirent-name">
+            <% if (dirent.is_img) { %>
+            <a class="normal img-name-link" href="<%= url %>" target="_blank"><%- dirent.obj_name %></a>
+            <% } else { %>
+            <a class="normal" href="<%= url %>" target="_blank"><%- dirent.obj_name %></a>
+            <% } %>
+        </span>
+    </td>
+    <td class="dirent-size"><%= dirent.file_size %></td>
+    <td class="dirent-update">
+        <% if (dirent.last_modified) { %>
+        <%= dirent.last_update %>
+        <% } else { %>
+        <% print("{% trans "Fetch failed" %}"); %>
+        <% } %>
+    </td>
+</script>
+<script type="text/template" id="tagged-item-file-mobile-tmpl">
+    <td class="dirent-icon">
+        <div class="pos-rel">
+        <% if (dirent.is_img || dirent.is_video) { %>
+            <% if (dirent.encoded_thumbnail_src) { %>
+            <img class="thumbnail" src="{{ SITE_ROOT }}<%- dirent.encoded_thumbnail_src %>" alt="" />
+            <% } else { %>
+            <img src="<%= icon_url %>" width="24" alt="" />
+            <% } %>
+        <% } else { %>
+        <img src="<%= icon_url %>" width="24" alt="" />
+        <% } %>
+        </div>
+    </td>
+    <td>
+        <span class="dirent-name">
+            <% if (dirent.is_img) { %>
+            <a class="normal img-name-link" href="<%= url %>" target="_blank"><%- dirent.obj_name %></a>
+            <span class="dirent-smart-link sf2-icon-link" title= "{% trans 'Internal link' %}"></span>
+            <% } else { %>
+            <a class="normal" href="<%= url %>" target="_blank"><%- dirent.obj_name %></a>
+            <br />
+            <% } %>
+            <span class="dirent-meta-info"><%= dirent.file_size %></span>
+            <span class="dirent-meta-info">
+            <% if (dirent.last_modified) { %>
+                <%= dirent.last_update %>
+            <% } else { %>
+                <% print("{% trans "Fetch failed" %}"); %>
+            <% } %>
+            </span>
+        </span>
+    </td>
+</script>

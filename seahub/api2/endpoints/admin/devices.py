@@ -9,7 +9,6 @@ from rest_framework import status
 
 from pysearpc import SearpcError
 
-from seahub.utils import is_pro_version
 from seahub.utils.devices import do_unlink_device
 from seahub.utils.timeutils import datetime_to_isoformat_timestr
 
@@ -17,10 +16,8 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.api2.models import TokenV2, DESKTOP_PLATFORMS
-from seahub.base.templatetags.seahub_tags import email2nickname
 
 logger = logging.getLogger(__name__)
-
 
 class AdminDevices(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -28,9 +25,6 @@ class AdminDevices(APIView):
     permission_classes = (IsAdminUser,)
 
     def get(self, request, format=None):
-
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             current_page = int(request.GET.get('page', '1'))
@@ -60,7 +54,6 @@ class AdminDevices(APIView):
             result['last_accessed'] = datetime_to_isoformat_timestr(device.last_accessed)
             result['last_login_ip'] = device.last_login_ip
             result['user'] = device.user
-            result['user_name'] = email2nickname(device.user)
             result['platform'] = device.platform
 
             result['is_desktop_client'] = False
@@ -76,9 +69,6 @@ class AdminDevices(APIView):
         return Response({"page_info": page_info, "devices": return_results})
 
     def delete(self, request, format=None):
-
-        if is_pro_version() and not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         platform = request.data.get('platform', '')
         device_id = request.data.get('device_id', '')

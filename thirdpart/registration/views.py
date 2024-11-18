@@ -15,7 +15,6 @@ from constance import config
 from seahub import settings
 from seahub.utils.auth import get_login_bg_image_path
 
-
 def activate(request, backend,
              template_name='registration/activate.html',
              success_url=None, extra_context=None, **kwargs):
@@ -89,7 +88,7 @@ def activate(request, backend,
     if extra_context is None:
         extra_context = {}
     context = {}
-    for key, value in list(extra_context.items()):
+    for key, value in extra_context.items():
         context[key] = callable(value) and value() or value
 
     return render(request, template_name,
@@ -209,7 +208,7 @@ def register(request, backend, success_url=None, form_class=None,
         extra_context = {}
     from django.template import RequestContext
     context = {}
-    for key, value in list(extra_context.items()):
+    for key, value in extra_context.items():
         context[key] = callable(value) and value() or value
 
     src = request.GET.get('src', '')
@@ -217,7 +216,11 @@ def register(request, backend, success_url=None, form_class=None,
         form = form_class(initial={'email': src})
 
     context['form'] = form
+    context['min_len'] = config.USER_PASSWORD_MIN_LENGTH
+    context['strong_pwd_required'] = config.USER_STRONG_PASSWORD_REQUIRED
+    context['level'] = config.USER_PASSWORD_STRENGTH_LEVEL
+
     login_bg_image_path = get_login_bg_image_path()
     context['login_bg_image_path'] = login_bg_image_path
-    context['strong_pwd_required'] = config.USER_STRONG_PASSWORD_REQUIRED
+
     return render(request, template_name, context)

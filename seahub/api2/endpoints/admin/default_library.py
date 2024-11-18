@@ -1,5 +1,4 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-import json
 import logging
 
 from rest_framework.authentication import SessionAuthentication
@@ -7,7 +6,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 from seaserv import seafile_api
 
@@ -30,8 +29,7 @@ class AdminDefaultLibrary(APIView):
     def create_default_repo(self, username):
 
         default_repo_id = seafile_api.create_repo(name=_("My Library"),
-                                                  desc=_("My Library"),
-                                                  username=username)
+                desc=_("My Library"), username=username, passwd=None)
 
         sys_repo_id = get_system_default_repo_id()
         if not sys_repo_id or not seafile_api.get_repo(sys_repo_id):
@@ -40,11 +38,8 @@ class AdminDefaultLibrary(APIView):
         dirents = seafile_api.list_dir_by_path(sys_repo_id, '/')
         for dirent in dirents:
             obj_name = dirent.obj_name
-            seafile_api.copy_file(sys_repo_id, '/',
-                                  json.dumps([obj_name]),
-                                  default_repo_id, '/',
-                                  json.dumps([obj_name]),
-                                  username, 0)
+            seafile_api.copy_file(sys_repo_id, '/', obj_name,
+                    default_repo_id, '/', obj_name, username, 0)
 
         UserOptions.objects.set_default_repo(username, default_repo_id)
 
@@ -56,9 +51,6 @@ class AdminDefaultLibrary(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         user_email = request.GET.get('user_email', None)
@@ -96,9 +88,6 @@ class AdminDefaultLibrary(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         user_email = request.POST.get('user_email', None)

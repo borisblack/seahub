@@ -9,15 +9,15 @@ from seahub.base.fields import LowerCaseCharField
 
 from django.db import models
 from django.core.files.base import ContentFile
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 from django.utils.encoding import smart_str
 from django.db.models import signals
 
 try:
-    from io import BytesIO
-    dir(BytesIO) # Placate PyFlakes
+    from cStringIO import StringIO
+    dir(StringIO) # Placate PyFlakes
 except ImportError:
-    from io import BytesIO
+    from StringIO import StringIO
 
 try:
     from PIL import Image
@@ -29,7 +29,7 @@ from seahub.avatar.util import invalidate_cache, get_avatar_file_storage
 from seahub.avatar.settings import (AVATAR_STORAGE_DIR, AVATAR_RESIZE_METHOD,
                              AVATAR_MAX_AVATARS_PER_USER, AVATAR_THUMB_FORMAT,
                              AVATAR_HASH_USERDIRNAMES, AVATAR_HASH_FILENAMES,
-                             AVATAR_THUMB_QUALITY, AVATAR_DEFAULT_SIZE,
+                             AVATAR_THUMB_QUALITY, AUTO_GENERATE_AVATAR_SIZES,
                              GROUP_AVATAR_STORAGE_DIR)
 
 # Get an instance of a logger
@@ -39,7 +39,7 @@ def avatar_file_path(instance=None, filename=None, size=None, ext=None):
     if isinstance(instance, Avatar):
         tmppath = [AVATAR_STORAGE_DIR]
         if AVATAR_HASH_USERDIRNAMES:
-            tmp = hashlib.md5(instance.emailuser.encode('utf-8')).hexdigest()
+            tmp = hashlib.md5(instance.emailuser).hexdigest()
             tmppath.extend([tmp[0], tmp[1], tmp[2:]])
         else:
             tmppath.append(instance.emailuser)
@@ -63,7 +63,7 @@ def avatar_file_path(instance=None, filename=None, size=None, ext=None):
         # File doesn't exist yet
         if AVATAR_HASH_FILENAMES:
             (root, ext) = os.path.splitext(filename)
-            filename = hashlib.md5(smart_str(filename).encode('utf-8')).hexdigest()
+            filename = hashlib.md5(smart_str(filename)).hexdigest()
             filename = filename + ext
     if size:
         tmppath.extend(['resized', str(size)])
@@ -92,7 +92,7 @@ class AvatarBase(object):
 
         try:
             orig = self.avatar.storage.open(self.avatar.name, 'rb').read()
-            image = Image.open(BytesIO(orig))
+            image = Image.open(StringIO(orig))
 
             quality = quality or AVATAR_THUMB_QUALITY
             (w, h) = image.size
@@ -106,7 +106,7 @@ class AvatarBase(object):
                 if image.mode != "RGBA":
                     image = image.convert("RGBA")
                 image = image.resize((size, size), AVATAR_RESIZE_METHOD)
-                thumb = BytesIO()
+                thumb = StringIO()
                 image.save(thumb, AVATAR_THUMB_FORMAT, quality=quality)
                 thumb_file = ContentFile(thumb.getvalue())
             else:
@@ -141,7 +141,7 @@ class Avatar(models.Model, AvatarBase):
     date_uploaded = models.DateTimeField(default=datetime.datetime.now)
     
     def __unicode__(self):
-        return _('Avatar for %s') % self.emailuser
+        return _(u'Avatar for %s') % self.emailuser
     
     def save(self, *args, **kwargs):
         avatars = Avatar.objects.filter(emailuser=self.emailuser)
@@ -169,14 +169,15 @@ class GroupAvatar(models.Model, AvatarBase):
     date_uploaded = models.DateTimeField(default=datetime.datetime.now)
     
     def __unicode__(self):
-        return _('Avatar for %s') % self.group_id
+        return _(u'Avatar for %s') % self.group_id
 
     def save(self, *args, **kwargs):
         super(GroupAvatar, self).save(*args, **kwargs)
 
 def create_default_thumbnails(instance=None, created=False, **kwargs):
     if created:
-        instance.create_thumbnail(AVATAR_DEFAULT_SIZE)
+        for size in AUTO_GENERATE_AVATAR_SIZES:
+            instance.create_thumbnail(size)
 
 signals.post_save.connect(create_default_thumbnails, sender=Avatar, dispatch_uid="create_default_thumbnails")
 

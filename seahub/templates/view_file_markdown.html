@@ -1,0 +1,39 @@
+{% load render_bundle from webpack_loader %}
+{% load static seahub_tags %}
+<!DOCTYPE html>
+<html>
+    <head>
+         <meta charset="UTF-8" />
+         <title>{{ filename }}</title>
+
+         <link rel="shortcut icon" href="{{ MEDIA_URL }}{{ favicon_path }}" />
+    </head>
+    <body>
+         <div id="root"></div>
+         <script type="text/javascript">
+           window.app = {
+              config: {
+                  mediaUrl: '{{ MEDIA_URL }}',
+                  siteRoot: '{{ SITE_ROOT }}',
+                  serviceUrl: '{{ serviceUrl }}',
+                  seafileCollabServer: '{{ seafile_collab_server}}',
+              },
+              pageOptions: {
+                  repoID: '{{ repo.id }}',
+                  filePath: '{{ path|escapejs }}',
+                  fileName: '{{ filename|escapejs }}',
+                  domain: '{{ domain }}',
+                  protocol: '{{ protocol }}',
+                  lang: '{{ language_code }}',
+                  mode: '{{ mode }}',
+              },
+             userInfo: {
+               username: '{{ user.username }}',
+               name: '{{ user.username|email2nickname|escapejs }}',
+               contact_email: '{{ user.username|email2contact_email }}',
+             }
+          }
+         </script>
+         {% render_bundle 'markdownEditor' %}
+    </body>
+</html>

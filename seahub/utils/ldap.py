@@ -1,7 +1,10 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-from seahub.settings import ENABLE_LDAP
+import seaserv
 
 def get_ldap_info():
-    """Get LDAP config from seahub_settings.py.
+    """Get LDAP config from ccnet.conf.
     """
-    return ENABLE_LDAP
+    try:
+        return seaserv.LDAP_HOST
+    except AttributeError:
+        return False

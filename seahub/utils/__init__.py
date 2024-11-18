@@ -1,45 +1,41 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # encoding: utf-8
-from functools import partial
 import os
 import re
-import urllib.request
-import urllib.parse
-import urllib.error
+import urllib
+import urllib2
 import uuid
 import logging
 import hashlib
 import tempfile
-import configparser
+import locale
+import ConfigParser
 import mimetypes
 import contextlib
-import json
 from datetime import datetime
-from urllib.parse import urlparse, urljoin
+from urlparse import urlparse, urljoin
+import json
 
+import ccnet
 from constance import config
 import seaserv
-from seaserv import seafile_api, ccnet_api
+from seaserv import seafile_api
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.core.mail import EmailMessage
 from django.shortcuts import render
-from django.template import loader
-from django.utils.translation import gettext as _
-from django.http import HttpResponseRedirect, HttpResponse
-from urllib.parse import quote
+from django.template import Context, loader
+from django.utils.translation import ugettext as _
+from django.http import HttpResponseRedirect, HttpResponse, HttpResponseNotModified
+from django.utils.http import urlquote
 from django.utils.html import escape
-from django.utils.timezone import make_naive, is_aware
-from django.utils.crypto import get_random_string
+from django.views.static import serve as django_static_serve
 
 from seahub.auth import REDIRECT_FIELD_NAME
 from seahub.api2.models import Token, TokenV2
 import seahub.settings
-from seahub.settings import MEDIA_URL, LOGO_PATH, \
+from seahub.settings import SITE_NAME, MEDIA_URL, LOGO_PATH, \
         MEDIA_ROOT, CUSTOM_LOGO_PATH
-from seahub.constants import PERMISSION_READ_WRITE
-from seahub.utils.db_api import SeafileDB
-
 try:
     from seahub.settings import EVENTS_CONFIG_FILE
 except ImportError:
@@ -57,38 +53,13 @@ try:
     from seahub.settings import ENABLE_INNER_FILESERVER
 except ImportError:
     ENABLE_INNER_FILESERVER = True
-
-logger = logging.getLogger(__name__)
-
-# init Seafevents API
-if EVENTS_CONFIG_FILE:
-    try:
-        from seafevents import seafevents_api
-    except ImportError:
-        logging.exception('Failed to import seafevents package.')
-        seafevents_api = None
-else:
-    class RPCProxy(object):
-        def __getattr__(self, name):
-            return partial(self.method_missing, name)
-
-        def method_missing(self, name, *args, **kwargs):
-            return None
-    seafevents_api = RPCProxy()
-
-def is_pro_version():
-    if seahub.settings.DEBUG:
-        if hasattr(seahub.settings, 'IS_PRO_VERSION') \
-            and seahub.settings.IS_PRO_VERSION:
-            return True
-
-    try:
-        return bool(seafevents_api.is_pro())
-    except AttributeError:
-        return False
+try:
+    from seahub.settings import CHECK_SHARE_LINK_TRAFFIC
+except ImportError:
+    CHECK_SHARE_LINK_TRAFFIC = False
 
 def is_cluster_mode():
-    cfg = configparser.ConfigParser()
+    cfg = ConfigParser.ConfigParser()
     if 'SEAFILE_CENTRAL_CONF_DIR' in os.environ:
         confdir = os.environ['SEAFILE_CENTRAL_CONF_DIR']
     else:
@@ -109,21 +80,14 @@ def is_cluster_mode():
 
 CLUSTER_MODE = is_cluster_mode()
 
-def is_db_sqlite3():
-    is_db_sqlite3 = False
-    try:
-        if 'sqlite3' in seahub.settings.DATABASES['default']['ENGINE']:
-            is_db_sqlite3 = True
-    except:
-        pass
-    return is_db_sqlite3
-
-IS_DB_SQLITE3 = is_db_sqlite3()
-
 try:
     from seahub.settings import OFFICE_CONVERTOR_ROOT
 except ImportError:
     OFFICE_CONVERTOR_ROOT = ''
+try:
+    from seahub.settings import OFFICE_CONVERTOR_NODE
+except ImportError:
+    OFFICE_CONVERTOR_NODE = False
 
 from seahub.utils.file_types import *
 from seahub.utils.htmldiff import HtmlDiff # used in views/files.py
@@ -132,17 +96,15 @@ EMPTY_SHA1 = '0000000000000000000000000000000000000000'
 MAX_INT = 2147483647
 
 PREVIEW_FILEEXT = {
-    IMAGE: ('gif', 'jpeg', 'jpg', 'png', 'ico', 'bmp', 'tif', 'tiff', 'psd', 'webp', 'jfif'),
-    DOCUMENT: ('doc', 'docx', 'docxf', 'oform', 'ppt', 'pptx', 'odt', 'fodt', 'odp', 'fodp', 'odg'),
+    IMAGE: ('gif', 'jpeg', 'jpg', 'png', 'ico', 'bmp', 'tif', 'tiff', 'eps'),
+    DOCUMENT: ('doc', 'docx', 'ppt', 'pptx', 'odt', 'fodt', 'odp', 'fodp'),
     SPREADSHEET: ('xls', 'xlsx', 'ods', 'fods'),
     SVG: ('svg',),
-    PDF: ('pdf', 'ai'),
+    PDF: ('pdf',),
     MARKDOWN: ('markdown', 'md'),
     VIDEO: ('mp4', 'ogv', 'webm', 'mov'),
-    AUDIO: ('mp3', 'oga', 'ogg', 'wav', 'flac', 'opus'),
-    #'3D': ('stl', 'obj'),
-    XMIND: ('xmind',),
-    SEADOC: ('sdoc',),
+    AUDIO: ('mp3', 'oga', 'ogg'),
+    '3D': ('stl', 'obj'),
 }
 
 def gen_fileext_type_map():
@@ -151,7 +113,7 @@ def gen_fileext_type_map():
 
     """
     d = {}
-    for filetype in list(PREVIEW_FILEEXT.keys()):
+    for filetype in PREVIEW_FILEEXT.keys():
         for fileext in PREVIEW_FILEEXT.get(filetype):
             d[fileext] = filetype
 
@@ -178,7 +140,7 @@ def render_error(request, msg=None, extra_ctx=None):
 
     """
     ctx = {}
-    ctx['error_msg'] = msg or _('Internal Server Error')
+    ctx['error_msg'] = msg or _('Internal error')
 
     if extra_ctx:
         for k in extra_ctx:
@@ -199,7 +161,7 @@ def get_fileserver_root():
     Returns:
     	Constructed fileserver root.
     """
-    return seahub.settings.FILE_SERVER_ROOT
+    return config.FILE_SERVER_ROOT
 
 def get_inner_fileserver_root():
     """Construct inner seafile fileserver address and port.
@@ -228,7 +190,7 @@ def normalize_cache_key(value, prefix=None, token=None, max_length=200):
     """
     key = value if prefix is None else prefix + value
     key = key if token is None else key + '_' + token
-    return quote(key)[:max_length]
+    return urlquote(key)[:max_length]
 
 def get_repo_last_modify(repo):
     """ Get last modification time for a repo.
@@ -294,22 +256,9 @@ def is_valid_username(username):
     """
     return is_valid_email(username)
 
-def is_valid_username2(username):
-    """ New username check function, old version is used by many others, stay put
-    """
-    return (not username.startswith(' ')) and (not username.endswith(' '))
-
 def is_valid_dirent_name(name):
     """Check whether repo/dir/file name is valid.
     """
-    for character in name:
-        # Emojis fall within the range \U0001F300 to \U0001FAD6
-        if 0x1F300 <= ord(character) <= 0x1FAD6:
-            return False
-    if name == '..':
-        return False
-    if '/' in name:
-        return False
     # `repo_id` parameter is not used in seafile api
     return seafile_api.is_valid_filename('fake_repo_id', name)
 
@@ -346,26 +295,15 @@ def get_no_duplicate_obj_name(obj_name, exist_obj_names):
                 i += 1
 
 def check_filename_with_rename(repo_id, parent_dir, obj_name):
-    exist_obj_names = list_obj_names_in_dir(repo_id, parent_dir)
-    return get_no_duplicate_obj_name(obj_name, exist_obj_names)
-
-def list_obj_names_in_dir(repo_id, parent_dir):
     cmmts = seafile_api.get_commit_list(repo_id, 0, 1)
     latest_commit = cmmts[0] if cmmts else None
     if not latest_commit:
         return ''
     # TODO: what if parrent_dir does not exist?
     dirents = seafile_api.list_dir_by_commit_and_path(repo_id,
-            latest_commit.id, parent_dir)
+            latest_commit.id, parent_dir.encode('utf-8'))
 
     exist_obj_names = [dirent.obj_name for dirent in dirents]
-    return exist_obj_names
-
-def check_filename_or_rename(repo_id, parent_dir, obj_name):
-    exist_obj_names = list_obj_names_in_dir(repo_id, parent_dir)
-
-    if obj_name not in exist_obj_names:
-        return obj_name
     return get_no_duplicate_obj_name(obj_name, exist_obj_names)
 
 def get_user_repos(username, org_id=None):
@@ -381,13 +319,14 @@ def get_user_repos(username, org_id=None):
         if CLOUD_MODE:
             public_repos = []
         else:
-            public_repos = seafile_api.get_inner_pub_repo_list()
+            public_repos = seaserv.list_inner_pub_repos(username)
 
         for r in shared_repos + public_repos:
             # collumn names in shared_repo struct are not same as owned or group
             # repos.
             r.id = r.repo_id
             r.name = r.repo_name
+            r.desc = r.repo_desc
             r.last_modify = r.last_modified
     else:
         owned_repos = seafile_api.get_org_owned_repo_list(org_id,
@@ -403,6 +342,7 @@ def get_user_repos(username, org_id=None):
             # repos.
             r.id = r.repo_id
             r.name = r.repo_name
+            r.desc = r.repo_desc
             r.last_modify = r.last_modified
 
     return (owned_repos, shared_repos, groups_repos, public_repos)
@@ -494,7 +434,7 @@ def gen_inner_file_get_url(token, filename):
     """
     if ENABLE_INNER_FILESERVER:
         return '%s/files/%s/%s' % (get_inner_fileserver_root(), token,
-                                   quote(filename))
+                                   urlquote(filename))
     else:
         return gen_file_get_url(token, filename)
 
@@ -539,28 +479,7 @@ def gen_file_get_url(token, filename):
     Generate fileserver file url.
     Format: http://<domain:port>/files/<token>/<filename>
     """
-    return '%s/files/%s/%s' % (get_fileserver_root(), token, quote(filename))
-
-
-def gen_file_get_url_by_sharelink(token):
-    """
-    Generate fileserver file url by sharelink.
-    Format: http://<domain:port>/f/<token>/
-    """
-    return '%s/f/%s/' % (get_fileserver_root(), token)
-
-def gen_file_get_url_new(repo_id, filepath, op='download'):
-    """
-    Generate fileserver file url.
-    Format: http://<domain:port>/repos/<repo_id>files/<filepath>/?op=download
-    """
-    
-    return '%s/repos/%s/files/%s/?op=%s' % (
-        get_fileserver_root(),
-        repo_id,
-        quote(filepath.strip('/')),
-        op
-    )
+    return '%s/files/%s/%s' % (get_fileserver_root(), token, urlquote(filename))
 
 def gen_file_upload_url(token, op, replace=False):
     url = '%s/%s/%s' % (get_fileserver_root(), op, token)
@@ -574,6 +493,10 @@ def gen_dir_zip_download_url(token):
     Format: http://<domain:port>/files/<token>/<filename>
     """
     return '%s/zip/%s' % (get_fileserver_root(), token)
+
+def get_ccnet_server_addr_port():
+    """get ccnet server host and port"""
+    return seaserv.CCNET_SERVER_ADDR, seaserv.CCNET_SERVER_PORT
 
 def string2list(string):
     """
@@ -601,16 +524,13 @@ def is_org_context(request):
 
 # events related
 if EVENTS_CONFIG_FILE:
-    parsed_events_conf = configparser.ConfigParser()
+    parsed_events_conf = ConfigParser.ConfigParser()
     parsed_events_conf.read(EVENTS_CONFIG_FILE)
 
-    try:
-        EVENTS_ENABLED = True
-        SeafEventsSession = seafevents_api.init_db_session_class(parsed_events_conf)
-    except ImportError:
-        logging.exception('Failed to import seafevents package.')
-        seafevents = None
-        EVENTS_ENABLED = False
+    import seafevents
+
+    EVENTS_ENABLED = True
+    SeafEventsSession = seafevents.init_db_session_class(EVENTS_CONFIG_FILE)
 
     @contextlib.contextmanager
     def _get_seafevents_session():
@@ -620,19 +540,126 @@ if EVENTS_CONFIG_FILE:
         finally:
            session.close()
 
+    def _same_events(e1, e2):
+        """Two events are equal should follow two rules:
+        1. event1.repo_id = event2.repo_id
+        2. event1.commit.creator = event2.commit.creator
+        3. event1.commit.desc = event2.commit.desc
+        """
+        if hasattr(e1, 'commit') and hasattr(e2, 'commit'):
+            if e1.repo_id == e2.repo_id and \
+               e1.commit.desc == e2.commit.desc and \
+               e1.commit.creator_name == e2.commit.creator_name:
+                return True
+        return False
+
+    def _get_events(username, start, count, org_id=None):
+        ev_session = SeafEventsSession()
+
+        valid_events = []
+        total_used = 0
+        try:
+            next_start = start
+            while True:
+                events = _get_events_inner(ev_session, username, next_start,
+                                           count, org_id)
+                if not events:
+                    break
+
+                # filter duplicatly commit and merged commit
+                for e1 in events:
+                    duplicate = False
+                    for e2 in valid_events:
+                        if _same_events(e1, e2): duplicate = True; break
+
+                    new_merge = False
+                    if hasattr(e1, 'commit') and e1.commit and \
+                       new_merge_with_no_conflict(e1.commit):
+                        new_merge = True
+
+                    if not duplicate and not new_merge:
+                        valid_events.append(e1)
+                    total_used = total_used + 1
+                    if len(valid_events) == count:
+                        break
+
+                if len(valid_events) == count:
+                    break
+                next_start = next_start + len(events)
+        finally:
+            ev_session.close()
+
+        for e in valid_events:            # parse commit description
+            if hasattr(e, 'commit'):
+                e.commit.converted_cmmt_desc = convert_cmmt_desc_link(e.commit)
+                e.commit.more_files = more_files_in_commit(e.commit)
+        return valid_events, start + total_used
 
     def _get_activities(username, start, count):
         ev_session = SeafEventsSession()
 
-        events = []
+        events, total_count = [], 0
         try:
-            events = seafevents_api.get_user_activities(ev_session,
+            events = seafevents.get_user_activities(ev_session,
                     username, start, count)
         finally:
             ev_session.close()
 
         return events
 
+    def _get_events_inner(ev_session, username, start, limit, org_id=None):
+        '''Read events from seafevents database, and remove events that are
+        no longer valid
+
+        Return 'limit' events or less than 'limit' events if no more events remain
+        '''
+        valid_events = []
+        next_start = start
+        while True:
+            if org_id > 0:
+                events = seafevents.get_org_user_events(ev_session, org_id,
+                                                        username, next_start,
+                                                        limit)
+            else:
+                events = seafevents.get_user_events(ev_session, username,
+                                                    next_start, limit)
+            if not events:
+                break
+
+            for ev in events:
+                if ev.etype == 'repo-update':
+                    repo = seafile_api.get_repo(ev.repo_id)
+                    if not repo:
+                        # delete the update event for repo which has been deleted
+                        seafevents.delete_event(ev_session, ev.uuid)
+                        continue
+                    if repo.encrypted:
+                        repo.password_set = seafile_api.is_password_set(
+                            repo.id, username)
+                    ev.repo = repo
+                    ev.commit = seaserv.get_commit(repo.id, repo.version, ev.commit_id)
+
+                valid_events.append(ev)
+                if len(valid_events) == limit:
+                    break
+
+            if len(valid_events) == limit:
+                break
+            next_start = next_start + len(valid_events)
+
+        return valid_events
+
+
+    def get_user_events(username, start, count):
+        """Return user events list and a new start.
+
+        For example:
+        ``get_user_events('foo@example.com', 0, 10)`` returns the first 10
+        events.
+        ``get_user_events('foo@example.com', 5, 10)`` returns the 6th through
+        15th events.
+        """
+        return _get_events(username, start, count)
 
     def get_user_activities(username, start, count):
         """Return user events list and a new start.
@@ -647,60 +674,35 @@ if EVENTS_CONFIG_FILE:
         """
         """
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_user_activity_stats_by_day(session, start, end, offset)
+            res = seafevents.get_user_activity_stats_by_day(session, start, end, offset)
         return res
 
-    def get_org_user_activity_stats_by_day(org_id, start, end):
-        """
-        """
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_org_user_activity_stats_by_day(session, org_id, start, end)
-        return res
+    def get_org_user_events(org_id, username, start, count):
+        return _get_events(username, start, count, org_id=org_id)
 
-    def get_file_history(repo_id, path, start, count, history_limit=-1):
+    def get_file_history(repo_id, path, start, count):
         """Return file histories
         """
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_file_history(session, repo_id, path, start, count, history_limit)
-        return res
-
-    def get_file_history_by_day(repo_id, path, start, count, to_tz, history_limit):
-        """Return file histories
-        """
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_file_history_by_day(session, repo_id, path, start, count, to_tz, history_limit)
-        return res
-
-    def get_file_daily_history_detail(repo_id, path, start_time, end_time, to_tz):
-        """Return file histories detail
-        """
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_file_daily_history_detail(session, repo_id, path, start_time, end_time, to_tz)
+            res = seafevents.get_file_history(session, repo_id, path, start, count)
         return res
 
     def get_log_events_by_time(log_type, tstart, tend):
         """Return log events list by start/end timestamp. (If no logs, return 'None')
         """
         with _get_seafevents_session() as session:
-            events = seafevents_api.get_event_log_by_time(session, log_type, tstart, tend)
+            events = seafevents.get_event_log_by_time(session, log_type, tstart, tend)
 
         return events if events else None
 
     def generate_file_audit_event_type(e):
-
-        event_type_dict = {
+        return {
             'file-download-web': ('web', ''),
-            'file-download-share-link': ('share-link', ''),
+            'file-download-share-link': ('share-link',''),
             'file-download-api': ('API', e.device),
             'repo-download-sync': ('download-sync', e.device),
             'repo-upload-sync': ('upload-sync', e.device),
-            'seadrive-download-file': ('seadrive-download', e.device),
-        }
-
-        if e.etype not in event_type_dict:
-            event_type_dict[e.etype] = (e.etype, e.device if e.device else '')
-
-        return event_type_dict[e.etype]
+        }[e.etype]
 
     def get_file_audit_events_by_path(email, org_id, repo_id, file_path, start, limit):
         """Return file audit events list by file path. (If no file audit, return 'None')
@@ -712,10 +714,10 @@ if EVENTS_CONFIG_FILE:
         15th events.
         """
         with _get_seafevents_session() as session:
-            events = seafevents_api.get_file_audit_events_by_path(session,
+            events = seafevents.get_file_audit_events_by_path(session,
                 email, org_id, repo_id, file_path, start, limit)
 
-        return events if events else []
+        return events if events else None
 
     def get_file_audit_events(email, org_id, repo_id, start, limit):
         """Return file audit events list. (If no file audit, return 'None')
@@ -727,7 +729,7 @@ if EVENTS_CONFIG_FILE:
         15th events.
         """
         with _get_seafevents_session() as session:
-            events = seafevents_api.get_file_audit_events(session, email, org_id, repo_id, start, limit)
+            events = seafevents.get_file_audit_events(session, email, org_id, repo_id, start, limit)
 
         return events if events else None
 
@@ -735,38 +737,24 @@ if EVENTS_CONFIG_FILE:
         """ return file audit record of sepcifiy time group by day.
         """
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_file_ops_stats_by_day(session, start, end, offset)
-        return res
-
-    def get_org_file_ops_stats_by_day(org_id, start, end, offset):
-        """ return file audit record of sepcifiy time group by day.
-        """
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_org_file_ops_stats_by_day(session, org_id, start, end, offset)
+            res = seafevents.get_file_ops_stats_by_day(session, start, end, offset)
         return res
 
     def get_total_storage_stats_by_day(start, end, offset):
         """
         """
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_total_storage_stats_by_day(session, start, end, offset)
-        return res
-
-    def get_org_total_storage_stats_by_day(org_id, start, end, offset):
-        """
-        """
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_org_storage_stats_by_day(session, org_id, start, end, offset)
+            res = seafevents.get_total_storage_stats_by_day(session, start, end, offset)
         return res
 
     def get_system_traffic_by_day(start, end, offset, op_type='all'):
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_system_traffic_by_day(session, start, end, offset, op_type)
+            res = seafevents.get_system_traffic_by_day(session, start, end, offset, op_type)
         return res
 
     def get_org_traffic_by_day(org_id, start, end, offset, op_type='all'):
         with _get_seafevents_session() as session:
-            res = seafevents_api.get_org_traffic_by_day(session, org_id, start, end, offset, op_type)
+            res = seafevents.get_org_traffic_by_day(session, org_id, start, end, offset, op_type)
         return res
 
     def get_file_update_events(email, org_id, repo_id, start, limit):
@@ -779,7 +767,7 @@ if EVENTS_CONFIG_FILE:
         15th events.
         """
         with _get_seafevents_session() as session:
-            events = seafevents_api.get_file_update_events(session, email, org_id, repo_id, start, limit)
+            events = seafevents.get_file_update_events(session, email, org_id, repo_id, start, limit)
         return events if events else None
 
     def get_perm_audit_events(email, org_id, repo_id, start, limit):
@@ -792,84 +780,35 @@ if EVENTS_CONFIG_FILE:
         15th events.
         """
         with _get_seafevents_session() as session:
-            events = seafevents_api.get_perm_audit_events(session, email, org_id, repo_id, start, limit)
+            events = seafevents.get_perm_audit_events(session, email, org_id, repo_id, start, limit)
 
         return events if events else None
 
-    def get_virus_files(repo_id=None, has_handled=None, start=-1, limit=-1):
+    def get_virus_record(repo_id=None, start=-1, limit=-1):
         with _get_seafevents_session() as session:
-            r = seafevents_api.get_virus_files(session, repo_id, has_handled, start, limit)
+            r = seafevents.get_virus_record(session, repo_id, start, limit)
         return r if r else []
 
-    def delete_virus_file(vid):
+    def handle_virus_record(vid):
         with _get_seafevents_session() as session:
-            return True if seafevents_api.delete_virus_file(session, vid) == 0 else False
+            return True if seafevents.handle_virus_record(session, vid) == 0 else False
 
-    def operate_virus_file(vid, ignore):
+    def get_virus_record_by_id(vid):
         with _get_seafevents_session() as session:
-            return True if seafevents_api.operate_virus_file(session, vid, ignore) == 0 else False
-
-    def get_virus_file_by_vid(vid):
-        with _get_seafevents_session() as session:
-            return seafevents_api.get_virus_file_by_vid(session, vid)
-
-    def get_file_scan_record(start=-1, limit=-1):
-        with _get_seafevents_session() as session:
-            records = seafevents_api.get_content_scan_results(session, start, limit)
-        return records if records else []
-
-    def get_user_activities_by_timestamp(username, start, end):
-        with _get_seafevents_session() as session:
-            events = seafevents_api.get_user_activities_by_timestamp(session, username, start, end)
-        return events if events else []
-
-    def get_all_users_traffic_by_month(month, start=-1, limit=-1, order_by='user', org_id=-1):
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_all_users_traffic_by_month(session, month, start, limit, order_by, org_id)
-        return res
-
-    def get_all_orgs_traffic_by_month(month, start=-1, limit=-1, order_by='user'):
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_all_orgs_traffic_by_month(session, month, start, limit, order_by)
-        return res
-
-    def get_user_traffic_by_month(username, month):
-        with _get_seafevents_session() as session:
-            res = seafevents_api.get_user_traffic_by_month(session, username, month)
-        return res
-
-    def get_file_history_suffix():
-        return seafevents_api.get_file_history_suffix(parsed_events_conf)
-
-    def get_trash_records(repo_id, show_time, start, limit):
-        with _get_seafevents_session() as session:
-            res, total_count = seafevents_api.get_delete_records(session, repo_id, show_time, start, limit)
-        return res, total_count
-
+            return seafevents.get_virus_record_by_id(session, vid)
 else:
-    parsed_events_conf = None
     EVENTS_ENABLED = False
-    def get_file_history_suffix():
-        pass
-    def get_all_users_traffic_by_month():
-        pass
-    def get_all_orgs_traffic_by_month():
-        pass
-    def get_user_traffic_by_month():
+    def get_user_events():
         pass
     def get_user_activity_stats_by_day():
         pass
-    def get_org_user_activity_stats_by_day():
-        pass
     def get_log_events_by_time():
+        pass
+    def get_org_user_events():
         pass
     def get_user_activities():
         pass
     def get_file_history():
-        pass
-    def get_file_history_by_day():
-        pass
-    def get_file_daily_history_detail():
         pass
     def generate_file_audit_event_type():
         pass
@@ -879,15 +818,9 @@ else:
         pass
     def get_file_ops_stats_by_day():
         pass
-    def get_org_file_ops_stats_by_day():
-        pass
     def get_total_storage_stats_by_day():
         pass
-    def get_org_total_storage_stats_by_day():
-        pass
     def get_system_traffic_by_day():
-        pass
-    def get_org_system_traffic_by_day():
         pass
     def get_org_traffic_by_day():
         pass
@@ -895,60 +828,25 @@ else:
         pass
     def get_perm_audit_events():
         pass
-    def get_virus_files():
+    def get_virus_record():
         pass
-    def delete_virus_file():
+    def handle_virus_record():
         pass
-    def operate_virus_file():
+    def get_virus_record_by_id(vid):
         pass
-    def get_virus_file_by_vid(vid):
-        pass
-    def get_file_scan_record():
-        pass
-    def get_user_activities_by_timestamp():
-        pass
-    def get_trash_records():
-        pass
-
 
 def calc_file_path_hash(path, bits=12):
-    if isinstance(path, str):
+    if isinstance(path, unicode):
         path = path.encode('UTF-8')
 
-    path_hash = hashlib.md5(urllib.parse.quote(path)).hexdigest()[:bits]
+    path_hash = hashlib.md5(urllib2.quote(path)).hexdigest()[:bits]
+
     return path_hash
 
 def get_service_url():
     """Get service url from seaserv.
     """
-    return seahub.settings.SERVICE_URL
-
-def get_webdav_url():
-    """Get webdav url.
-    """
-
-    if 'SEAFILE_CENTRAL_CONF_DIR' in os.environ:
-        conf_dir = os.environ['SEAFILE_CENTRAL_CONF_DIR']
-    else:
-        conf_dir = os.environ['SEAFILE_CONF_DIR']
-
-    conf_file = os.path.join(conf_dir, 'seafdav.conf')
-    if not os.path.exists(conf_file):
-        return ""
-
-    config = configparser.ConfigParser()
-    config.read(conf_file)
-    if not config.has_option("WEBDAV", "share_name"):
-        return ""
-
-    share_name = config.get("WEBDAV", "share_name")
-    share_name = share_name.strip('/')
-
-    service_url = get_service_url()
-    service_url = service_url.rstrip('/')
-
-    return "{}/{}/".format(service_url, share_name)
-
+    return config.SERVICE_URL
 
 def get_server_id():
     """Get server id from seaserv.
@@ -1029,7 +927,6 @@ def gen_shared_upload_link(token):
     service_url = service_url.rstrip('/')
     return '%s/u/d/%s/' % (service_url, token)
 
-
 def show_delete_days(request):
     if request.method == 'GET':
         days_str = request.GET.get('days', '')
@@ -1049,7 +946,7 @@ def is_textual_file(file_type):
     """
     Check whether a file type is a textual file.
     """
-    if file_type == TEXT or file_type == MARKDOWN or file_type == SEADOC:
+    if file_type == TEXT or file_type == MARKDOWN:
         return True
     else:
         return False
@@ -1057,7 +954,7 @@ def is_textual_file(file_type):
 def redirect_to_login(request):
     from django.conf import settings
     login_url = settings.LOGIN_URL
-    path = quote(request.get_full_path())
+    path = urlquote(request.get_full_path())
     tup = login_url, REDIRECT_FIELD_NAME, path
     return HttpResponseRedirect('%s?%s=%s' % tup)
 
@@ -1067,8 +964,12 @@ def mkstemp():
 
     '''
     fd, path = tempfile.mkstemp()
-
-    return fd, path
+    system_encoding = locale.getdefaultlocale()[1]
+    if system_encoding is not None:
+        path_utf8 = path.decode(system_encoding).encode('UTF-8')
+        return fd, path_utf8
+    else:
+        return fd, path
 
 # File or directory operations
 FILE_OP = ('Added or modified', 'Added', 'Modified', 'Renamed', 'Moved',
@@ -1095,10 +996,10 @@ def convert_cmmt_desc_link(commit):
 
         tmp_str = '%s "<a href="%s?repo_id=%s&cmmt_id=%s&nm=%s" class="normal">%s</a>"'
         if remaining:
-            return (tmp_str + ' %s') % (op, conv_link_url, repo_id, cmmt_id, quote(file_or_dir),
+            return (tmp_str + ' %s') % (op, conv_link_url, repo_id, cmmt_id, urlquote(file_or_dir),
                                         escape(file_or_dir), remaining)
         else:
-            return tmp_str % (op, conv_link_url, repo_id, cmmt_id, quote(file_or_dir), escape(file_or_dir))
+            return tmp_str % (op, conv_link_url, repo_id, cmmt_id, urlquote(file_or_dir), escape(file_or_dir))
 
     return re.sub(CMMT_DESC_PATT, link_repl, commit.desc)
 
@@ -1119,138 +1020,271 @@ def more_files_in_commit(commit):
 FILE_AUDIT_ENABLED = False
 if EVENTS_CONFIG_FILE:
     def check_file_audit_enabled():
-        enabled = False
-        if hasattr(seafevents_api, 'is_audit_enabled'):
-            enabled = seafevents_api.is_audit_enabled(parsed_events_conf)
+        enabled = seafevents.is_audit_enabled(parsed_events_conf)
 
-            if enabled:
-                logging.debug('file audit: enabled')
-            else:
-                logging.debug('file audit: not enabled')
+        if enabled:
+            logging.debug('file audit: enabled')
+        else:
+            logging.debug('file audit: not enabled')
         return enabled
 
     FILE_AUDIT_ENABLED = check_file_audit_enabled()
 
 # office convert related
-def check_office_converter_enabled():
-    if OFFICE_CONVERTOR_ROOT:
-        return True
-    return False
+HAS_OFFICE_CONVERTER = False
+if EVENTS_CONFIG_FILE:
+    def check_office_converter_enabled():
+        enabled = seafevents.is_office_converter_enabled(parsed_events_conf)
 
-HAS_OFFICE_CONVERTER = check_office_converter_enabled()
+        if enabled:
+            logging.debug('office converter: enabled')
+        else:
+            logging.debug('office converter: not enabled')
+        return enabled
+
+    def get_office_converter_html_dir():
+        return seafevents.get_office_converter_dir(parsed_events_conf, 'html')
+
+    def get_office_converter_pdf_dir():
+        return seafevents.get_office_converter_dir(parsed_events_conf, 'pdf')
+
+    def get_office_converter_limit():
+        return seafevents.get_office_converter_limit(parsed_events_conf)
+
+    HAS_OFFICE_CONVERTER = check_office_converter_enabled()
+
 OFFICE_PREVIEW_MAX_SIZE = 2 * 1024 * 1024
-OFFICE_PREVIEW_MAX_PAGES = 50
-
 if HAS_OFFICE_CONVERTER:
 
-    import time
-    import requests
-    import jwt
+    OFFICE_HTML_DIR = get_office_converter_html_dir()
+    OFFICE_PDF_DIR = get_office_converter_pdf_dir()
+    OFFICE_PREVIEW_MAX_SIZE, OFFICE_PREVIEW_MAX_PAGES = get_office_converter_limit()
 
-    def add_office_convert_task(file_id, doctype, raw_path):
-        payload = {'exp': int(time.time()) + 300, }
-        token = jwt.encode(payload, seahub.settings.SECRET_KEY, algorithm='HS256')
-        headers = {"Authorization": "Token %s" % token}
-        params = {'file_id': file_id, 'doctype': doctype, 'raw_path': raw_path}
-        url = urljoin(OFFICE_CONVERTOR_ROOT, '/add-task')
-        requests.get(url, params, headers=headers)
-        return {'exists': False}
+    from seafevents.office_converter import OfficeConverterRpcClient
+    office_converter_rpc = None
 
-    def query_office_convert_status(file_id, doctype):
-        payload = {'exp': int(time.time()) + 300, }
-        token = jwt.encode(payload, seahub.settings.SECRET_KEY, algorithm='HS256')
-        headers = {"Authorization": "Token %s" % token}
-        params = {'file_id': file_id, 'doctype': doctype}
-        url = urljoin(OFFICE_CONVERTOR_ROOT, '/query-status')
-        d = requests.get(url, params, headers=headers)
-        d = d.json()
-        ret = {}
-        if 'error' in d:
-            ret['error'] = d['error']
-            ret['status'] = 'ERROR'
-        else:
-            ret['success'] = True
-            ret['status'] = d['status']
-        return ret
+    def _get_office_converter_rpc():
+        global office_converter_rpc
+        if office_converter_rpc is None:
+            pool = ccnet.ClientPool(
+                seaserv.CCNET_CONF_PATH,
+                central_config_dir=seaserv.SEAFILE_CENTRAL_CONF_DIR
+            )
+            office_converter_rpc = OfficeConverterRpcClient(pool)
 
-    def get_office_converted_page(path, static_filename, file_id):
-        url = urljoin(OFFICE_CONVERTOR_ROOT, '/get-converted-page')
-        payload = {'exp': int(time.time()) + 300, }
-        token = jwt.encode(payload, seahub.settings.SECRET_KEY, algorithm='HS256')
-        headers = {"Authorization": "Token %s" % token}
-        params = {'static_filename': static_filename, 'file_id': file_id}
+        return office_converter_rpc
+
+    def office_convert_cluster_token(file_id):
+        from django.core import signing
+        s = '-'.join([file_id, datetime.now().strftime('%Y%m%d')])
+        return signing.Signer().sign(s)
+
+    def _office_convert_token_header(file_id):
+        return {
+            'X-Seafile-Office-Preview-Token': office_convert_cluster_token(file_id),
+        }
+
+    def cluster_delegate(delegate_func):
+        '''usage:
+
+        @cluster_delegate(funcA)
+        def func(*args):
+            ...non-cluster logic goes here...
+
+        - In non-cluster mode, this decorator effectively does nothing.
+        - In cluster mode, if this node is not the office convert node,
+        funcA is called instead of the decorated function itself
+
+        '''
+        def decorated(func):
+            def real_func(*args, **kwargs):
+                cluster_internal = kwargs.pop('cluster_internal', False)
+                if CLUSTER_MODE and not OFFICE_CONVERTOR_NODE and not cluster_internal:
+                    return delegate_func(*args)
+                else:
+                    return func(*args)
+            return real_func
+
+        return decorated
+
+    def delegate_add_office_convert_task(file_id, doctype, raw_path):
+        url = urljoin(OFFICE_CONVERTOR_ROOT, '/office-convert/internal/add-task/')
+        data = urllib.urlencode({
+            'file_id': file_id,
+            'doctype': doctype,
+            'raw_path': raw_path,
+        })
+
+        headers = _office_convert_token_header(file_id)
+        ret = do_urlopen(url, data=data, headers=headers).read()
+
+        return json.loads(ret)
+
+    def delegate_query_office_convert_status(file_id, doctype):
+        url = urljoin(OFFICE_CONVERTOR_ROOT, '/office-convert/internal/status/')
+        url += '?file_id=%s&doctype=%s' % (file_id, doctype)
+        headers = _office_convert_token_header(file_id)
+        ret = do_urlopen(url, headers=headers).read()
+
+        return json.loads(ret)
+
+    def delegate_get_office_converted_page(request, repo_id, commit_id, path, static_filename, file_id):
+        url = urljoin(OFFICE_CONVERTOR_ROOT,
+                      '/office-convert/internal/static/%s/%s%s/%s' % (
+                          repo_id, commit_id, urlquote(path), urlquote(static_filename)))
+        url += '?file_id=' + file_id
+        headers = _office_convert_token_header(file_id)
+        timestamp = request.META.get('HTTP_IF_MODIFIED_SINCE')
+        if timestamp:
+            headers['If-Modified-Since'] = timestamp
+
         try:
-            ret = requests.get(url, params, headers=headers)
-        except urllib.error.HTTPError as e:
-            raise Exception(e)
+            ret = do_urlopen(url, headers=headers)
+            data = ret.read()
+        except urllib2.HTTPError, e:
+            if timestamp and e.code == 304:
+                return HttpResponseNotModified()
+            else:
+                raise
 
         content_type = ret.headers.get('content-type', None)
         if content_type is None:
             dummy, ext = os.path.splitext(os.path.basename(path))
             content_type = mimetypes.types_map.get(ext, 'application/octet-stream')
 
-        resp = HttpResponse(ret, content_type=content_type)
+        resp = HttpResponse(data, content_type=content_type)
         if 'last-modified' in ret.headers:
             resp['Last-Modified'] = ret.headers.get('last-modified')
 
         return resp
 
+    @cluster_delegate(delegate_add_office_convert_task)
+    def add_office_convert_task(file_id, doctype, raw_path):
+        rpc = _get_office_converter_rpc()
+        d = rpc.add_task(file_id, doctype, raw_path)
+        return {
+            'exists': False,
+        }
+
+    @cluster_delegate(delegate_query_office_convert_status)
+    def query_office_convert_status(file_id, doctype):
+        rpc = _get_office_converter_rpc()
+        d = rpc.query_convert_status(file_id, doctype)
+        ret = {}
+        if d.error:
+            ret['error'] = d.error
+            ret['status'] = 'ERROR'
+        else:
+            ret['success'] = True
+            ret['status'] = d.status
+            ret['info'] = d.info
+        return ret
+
+    @cluster_delegate(delegate_get_office_converted_page)
+    def get_office_converted_page(request, repo_id, commit_id, path, static_filename, file_id):
+        office_out_dir = OFFICE_HTML_DIR
+        filepath = os.path.join(file_id, static_filename)
+        if static_filename.endswith('.pdf'):
+            office_out_dir = OFFICE_PDF_DIR
+            filepath = static_filename
+        return django_static_serve(request,
+                                   filepath,
+                                   document_root=office_out_dir)
+
     def prepare_converted_html(raw_path, obj_id, doctype, ret_dict):
         try:
             add_office_convert_task(obj_id, doctype, raw_path)
-        except Exception as e:
-            logging.exception('failed to add_office_convert_task: %s' % e)
-            return _('Internal Server Error')
+        except:
+            logging.exception('failed to add_office_convert_task:')
+            return _(u'Internal error')
         return None
 
 # search realted
 HAS_FILE_SEARCH = False
-HAS_FILE_SEASEARCH = False
 if EVENTS_CONFIG_FILE:
     def check_search_enabled():
         enabled = False
-        if hasattr(seafevents_api, 'is_search_enabled'):
-            enabled = seafevents_api.is_search_enabled(parsed_events_conf)
+        if hasattr(seafevents, 'is_search_enabled'):
+            enabled = seafevents.is_search_enabled(parsed_events_conf)
 
             if enabled:
                 logging.debug('search: enabled')
             else:
                 logging.debug('search: not enabled')
-        return enabled
-
-    def check_seasearch_enabled():
-        enabled = False
-        if hasattr(seafevents_api, 'is_seasearch_enabled'):
-            enabled = seafevents_api.is_seasearch_enabled(parsed_events_conf)
         return enabled
 
     HAS_FILE_SEARCH = check_search_enabled()
-    HAS_FILE_SEASEARCH = check_seasearch_enabled()
 
-# repo auto delete related
-ENABLE_REPO_AUTO_DEL = False
-if EVENTS_CONFIG_FILE:
-    def check_repo_auto_del_enabled():
-        enabled = False
-        if hasattr(seafevents_api, 'is_repo_auto_del_enabled'):
-            enabled = seafevents_api.is_repo_auto_del_enabled(parsed_events_conf)
-            if enabled:
-                logging.debug('search: enabled')
-            else:
-                logging.debug('search: not enabled')
-        return enabled
+TRAFFIC_STATS_ENABLED = False
+if EVENTS_CONFIG_FILE and hasattr(seafevents, 'get_user_traffic_stat'):
+    TRAFFIC_STATS_ENABLED = True
+    def get_user_traffic_stat(username):
+        session = SeafEventsSession()
+        try:
+            stat = seafevents.get_user_traffic_stat(session, username)
+        finally:
+            session.close()
+        return stat
 
-    ENABLE_REPO_AUTO_DEL = check_repo_auto_del_enabled()
+    def get_user_traffic_list(month, start=0, limit=25):
+        session = SeafEventsSession()
+        try:
+            stat = seafevents.get_user_traffic_list(session, month, start, limit)
+        finally:
+            session.close()
+        return stat
 
-def get_password_strength_level(password):
+else:
+    def get_user_traffic_stat(username):
+        pass
+    def get_user_traffic_list():
+        pass
 
-    num = 0
-    for letter in password:
-        # get ascii dec
-        # bitwise OR
-        num |= get_char_mode(ord(letter))
+def user_traffic_over_limit(username):
+    """Return ``True`` if user traffic over the limit, otherwise ``False``.
+    """
+    if not CHECK_SHARE_LINK_TRAFFIC:
+        return False
 
-    return calculate_bitwise(num)
+    from seahub_extra.plan.models import UserPlan
+    from seahub_extra.plan.settings import PLAN
+    up = UserPlan.objects.get_valid_plan_by_user(username)
+    plan = 'Free' if up is None else up.plan_type
+    traffic_limit = int(PLAN[plan]['share_link_traffic']) * 1024 * 1024 * 1024
+
+    try:
+        stat = get_user_traffic_stat(username)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error('Failed to get user traffic stat: %s' % username,
+                     exc_info=True)
+        return True
+
+    if stat is None:            # No traffic record yet
+        return False
+
+    month_traffic = stat['file_view'] + stat['file_download'] + stat['dir_download']
+    return True if month_traffic >= traffic_limit else False
+
+def is_user_password_strong(password):
+    """Return ``True`` if user's password is STRONG, otherwise ``False``.
+       STRONG means password has at least USER_PASSWORD_STRENGTH_LEVEL(3) types of the bellow:
+       num, upper letter, lower letter, other symbols
+    """
+
+    if len(password) < config.USER_PASSWORD_MIN_LENGTH:
+        return False
+    else:
+        num = 0
+        for letter in password:
+            # get ascii dec
+            # bitwise OR
+            num |= get_char_mode(ord(letter))
+
+        if calculate_bitwise(num) < config.USER_PASSWORD_STRENGTH_LEVEL:
+            return False
+        else:
+            return True
 
 def get_char_mode(n):
     """Return different num according to the type of given letter:
@@ -1281,15 +1315,25 @@ def calculate_bitwise(num):
     return level
 
 def do_md5(s):
-    if isinstance(s, str):
+    if isinstance(s, unicode):
         s = s.encode('UTF-8')
     return hashlib.md5(s).hexdigest()
 
 def do_urlopen(url, data=None, headers=None):
     headers = headers or {}
-    req = urllib.request.Request(url, data=data, headers=headers)
-    ret = urllib.request.urlopen(req)
+    req = urllib2.Request(url, data=data, headers=headers)
+    ret = urllib2.urlopen(req)
     return ret
+
+def is_pro_version():
+    if seahub.settings.DEBUG:
+        if hasattr(seahub.settings, 'IS_PRO_VERSION') \
+            and seahub.settings.IS_PRO_VERSION:
+            return True
+    if EVENTS_CONFIG_FILE:
+        return True
+    else:
+        return False
 
 def clear_token(username):
     '''
@@ -1299,38 +1343,6 @@ def clear_token(username):
     Token.objects.filter(user = username).delete()
     TokenV2.objects.filter(user = username).delete()
     seafile_api.delete_repo_tokens_by_email(username)
-
-
-def inactive_user(username):
-    # del tokens and personal repo api tokens (not department)
-    from seahub.repo_api_tokens.models import RepoAPITokens
-    try:
-        clear_token(username)
-    except Exception as e:
-        logger.error("Failed to delete tokens for user %s: %s." % (username, e))
-    try:
-        from seahub.settings import MULTI_TENANCY
-    except ImportError:
-        MULTI_TENANCY = False
-    try:
-        org_id = -1
-        if MULTI_TENANCY:
-            orgs = ccnet_api.get_orgs_by_user(username)
-            if orgs:
-                org = orgs[0]
-                org_id = org.org_id
-        if org_id > 0:
-            owned_repos = seafile_api.get_org_owned_repo_list(
-                org_id, username, ret_corrupted=True)
-        else:
-            owned_repos = seafile_api.get_owned_repo_list(
-                username, ret_corrupted=True)
-        owned_repo_ids = [item.repo_id for item in owned_repos]
-        RepoAPITokens.objects.filter(
-            repo_id__in=owned_repo_ids).delete()
-    except Exception as e:
-        logger.error("Failed to delete repo api tokens for user %s: %s." % (username, e))
-
 
 def send_perm_audit_msg(etype, from_user, to, repo_id, path, perm):
     """Send repo permission audit msg.
@@ -1343,33 +1355,15 @@ def send_perm_audit_msg(etype, from_user, to, repo_id, path, perm):
     - `path`: dir path
     - `perm`: r or rw
     """
-
-    msg = {
-        'msg_type': 'perm-change',
-        'etype': etype,
-        'from_user': from_user,
-        'to': to,
-        'repo_id': repo_id,
-        'file_path': path,
-        'perm': perm,
-    }
+    msg = 'perm-update\t%s\t%s\t%s\t%s\t%s\t%s' % \
+        (etype, from_user, to, repo_id, path, perm)
+    msg_utf8 = msg.encode('utf-8')
 
     try:
-        seafile_api.publish_event('seahub.audit', json.dumps(msg))
+        seaserv.send_message('seahub.audit', msg_utf8)
     except Exception as e:
         logger.error("Error when sending perm-audit-%s message: %s" %
                      (etype, str(e)))
-
-
-def send_user_login_msg(username, timestamp, org_id):
-    msg = {
-        'msg_type': 'user-login',
-        'user_name': username,
-        'timestamp': timestamp,
-        'org_id': org_id,
-    }
-    seafile_api.publish_event('seahub.stats', json.dumps(msg))
-
 
 def get_origin_repo_info(repo_id):
     repo = seafile_api.get_repo(repo_id)
@@ -1382,12 +1376,6 @@ def get_origin_repo_info(repo_id):
 
 def within_time_range(d1, d2, maxdiff_seconds):
     '''Return true if two datetime.datetime object differs less than the given seconds'''
-    if is_aware(d1):
-        d1 = make_naive(d1)
-
-    if is_aware(d2):
-        d2 = make_naive(d2)
-
     delta = d2 - d1 if d2 > d1 else d1 - d2
     # delta.total_seconds() is only available in python 2.7+
     diff = (delta.microseconds + (delta.seconds + delta.days*24*3600) * 1e6) / 1e6
@@ -1405,10 +1393,10 @@ def get_system_admins():
     return admins
 
 def is_windows_operating_system(request):
-    if 'user-agent' not in request.headers:
+    if not request.META.has_key('HTTP_USER_AGENT'):
         return False
 
-    if 'windows' in request.headers['user-agent'].lower():
+    if 'windows' in request.META['HTTP_USER_AGENT'].lower():
         return True
     else:
         return False
@@ -1419,7 +1407,7 @@ def get_folder_permission_recursively(username, repo_id, path):
     Ger permission from the innermost layer of subdirectories to root
     directory.
     """
-    if not path or not isinstance(path, str):
+    if not path or not isinstance(path, basestring):
         raise Exception('path invalid.')
 
     if not seafile_api.get_dir_id_by_path(repo_id, path):
@@ -1436,109 +1424,3 @@ def is_valid_org_id(org_id):
         return True
     else:
         return False
-
-
-def hash_password(password, algorithm='sha1', salt=get_random_string(4)):
-
-    digest = hashlib.pbkdf2_hmac(algorithm,
-                                 password.encode(),
-                                 salt.encode(),
-                                 10000)
-    hex_hash = digest.hex()
-
-    # sha1$QRle$5511a4e2efb7d12e1f64647f64c0c6e105d150ff
-    return "{}${}${}".format(algorithm, salt, hex_hash)
-
-
-def check_hashed_password(password, hashed_password):
-
-    algorithm, salt, hex_hash = hashed_password.split('$')
-
-    return hashed_password == hash_password(password, algorithm, salt)
-
-
-ASCII_RE = re.compile(r'[^\x00-\x7f]')
-
-
-def is_valid_password(password):
-
-    return False if ASCII_RE.search(password) else True
-
-
-def get_logo_path_by_user(username):
-
-    logo_path = LOGO_PATH
-
-    # custom logo
-    custom_logo_file = os.path.join(MEDIA_ROOT, CUSTOM_LOGO_PATH)
-    if os.path.exists(custom_logo_file):
-        logo_path = CUSTOM_LOGO_PATH
-
-    # org custom logo
-    orgs = ccnet_api.get_orgs_by_user(username)
-    if orgs:
-
-        from seahub.organizations.settings import ORG_ENABLE_ADMIN_CUSTOM_LOGO
-        if ORG_ENABLE_ADMIN_CUSTOM_LOGO:
-
-            org = orgs[0]
-            from seahub.organizations.models import OrgAdminSettings
-            org_logo_url = OrgAdminSettings.objects.get_org_logo_url(org.org_id)
-
-            if org_logo_url:
-                logo_path = org_logo_url
-
-                from seahub.avatar.settings import AVATAR_FILE_STORAGE
-                if AVATAR_FILE_STORAGE == 'seahub.base.database_storage.DatabaseStorage':
-                    logo_path = "/image-view/" + logo_path
-
-    return logo_path
-
-
-def transfer_repo(repo_id, new_owner, is_share, org_id=None):
-    group_id = None
-    if "seafile_group" in new_owner:
-        group_id = int(new_owner.split('@')[0])
-    if type(is_share) is not bool:
-        if is_share == 'false':
-            is_share = False
-        else:
-            is_share = True
-    repo_owner = seafile_api.get_org_repo_owner(repo_id) if org_id else seafile_api.get_repo_owner(repo_id)
-    current_group_id = None
-    if "seafile_group" in repo_owner:
-        current_group_id = int(repo_owner.split('@')[0])
-    # transfer repo
-    # retain share
-    if is_share:
-        seafile_db_api = SeafileDB()
-        # transfer to group
-        if group_id:
-            if org_id and org_id != ccnet_api.get_org_id_by_group(group_id):
-                error_msg = 'Permission denied.'
-                raise error_msg
-            seafile_db_api.set_repo_group_owner(repo_id, group_id, current_group_id, org_id)
-        # transfer to user
-        else:
-            seafile_db_api.set_repo_owner(repo_id, new_owner, org_id)
-
-        # Update shares and delete the old owner's token
-        seafile_db_api.update_repo_user_shares(repo_id, new_owner, org_id)
-        seafile_db_api.update_repo_group_shares(repo_id, new_owner, org_id)
-        seafile_db_api.delete_repo_user_token(repo_id, repo_owner)
-    else:
-        if org_id:
-            if group_id:
-                # org transfer check,only transfer current org repo
-                if org_id != ccnet_api.get_org_id_by_group(group_id):
-                    error_msg = 'Permission denied.'
-                    raise error_msg
-                seafile_api.org_transfer_repo_to_group(repo_id, org_id, group_id, PERMISSION_READ_WRITE)
-            else:
-                seafile_api.set_org_repo_owner(org_id, repo_id, new_owner)
-        else:
-            if group_id:
-                seafile_api.transfer_repo_to_group(repo_id, group_id, PERMISSION_READ_WRITE)
-            else:
-                seafile_api.set_repo_owner(repo_id, new_owner)
-

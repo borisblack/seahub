@@ -4,14 +4,13 @@ import requests
 import unittest
 from contextlib import contextmanager
 from nose.tools import assert_equal, assert_in # pylint: disable=E0611
-from urllib.parse import quote
+from urllib import quote
 
 from tests.common.common import USERNAME, PASSWORD, \
     ADMIN_USERNAME, ADMIN_PASSWORD
 
 from tests.common.utils import apiurl, urljoin, randstring
 from tests.api.urls import TOKEN_URL, GROUPS_URL, ACCOUNTS_URL, REPOS_URL
-from seahub.base.accounts import User
 
 class ApiTestBase(unittest.TestCase):
     _token = None
@@ -176,11 +175,8 @@ class ApiTestBase(unittest.TestCase):
     def create_user(self):
         username = '%s@test.com' % randstring(20)
         password = randstring(20)
-        user = User(email=username)
-        user.is_staff = False
-        user.is_active = True
-        user.set_password(password)
-        user.save()
+        data = {'password': password}
+        self.admin_put(urljoin(ACCOUNTS_URL, username), data=data, expected=201)
         return _User(username, password)
 
     def remove_user(self, username):
@@ -188,7 +184,7 @@ class ApiTestBase(unittest.TestCase):
         self.admin_delete(user_url)
 
     def create_file(self, repo, fname=None):
-        if isinstance(repo, str):
+        if isinstance(repo, basestring):
             repo = _Repo(repo)
         fname = fname or ('文件 %s.txt' % randstring())
         furl = repo.get_filepath_url('/' + fname)
@@ -202,7 +198,7 @@ class ApiTestBase(unittest.TestCase):
         dpath = '/目录 %s' % randstring()
         durl = repo.get_dirpath_url(dpath)
         res = self.post(durl, data=data, expected=201)
-        self.assertEqual(res.text, '"success"')
+        self.assertEqual(res.text, u'"success"')
         return dpath, durl
 
 

@@ -1,75 +1,46 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 {% load i18n %}
 
-{% block sub_title %}{% trans "Confirm Password" %} - {% endblock %}
-{% block header_css_class %}hide{% endblock %}
-{% block extra_base_style %}
-<link rel="stylesheet" type="text/css" href="{{ MEDIA_URL }}css/seafile-ui.css" />
-{% endblock %}
-
-{% block extra_style %}
-<style type="text/css">
-html, body, #wrapper { height:100%; }
-#wrapper {
-  background: url('{{ MEDIA_URL }}{{login_bg_image_path}}') center top no-repeat scroll;
-  background-size: cover;
-  padding-top:1px;
-}
-</style>
-{% endblock %}
+{% block title %}{% trans "Confirm Password" %}{% endblock %}
 
 {% block main_content %}
-<div class="login-panel-outer-container vh">
-  <div class="login-panel" id="log-in-panel">
-    <h1 class="login-panel-hd">{% trans "Confirm password to continue" %}</h1>
-    <p class="text-center">{% trans "You are entering admin area, we won't ask for your password again for a few hours." %}</p>
-    <form action="" method="post" class="con">{% csrf_token %}
-      <div class="position-relative">
-        <input id="password-input" type="password" name="password" placeholder="{% trans "Password" %}" aria-label="{% trans "Password" %}" title="{% trans "Password" %}" value="" class="input" autocomplete="off" />
-        <i id="toggle-show-password" class="sf3-font sf3-font-eye-slash"></i>
-      </div>
-      {% if password_error %}
-      <p class="error mt-1">{% trans "Incorrect password" %}</p>
-      {% else %}
-      <p class="error mt-1 hide"></p>
-      {% endif %}
+<div class="new-narrow-panel">
+<h2 class="hd">{% trans "Confirm password to continue" %}</h2>
+<form action="" method="post" class="con">{% csrf_token %}
+	<label for="password">{% trans "Password" %}</label>
+	<input type="password" name="password" value="" class="input" autocomplete="off" />
+    {% if password_error %}
+	<p class="error">{% trans "Incorrect password" %}</p>
+    {% else %}
+	<p class="error hide"></p>
+    {% endif %}
 
-      <button type="submit" class="submit btn btn-primary btn-block h-auto mb-3">{% trans "Confirm Password" %}</button>
-      {% if enable_sso %}
-      <button id="shib-login" class="btn btn-secondary btn-block mb-3">SSO</button>
-      {% endif %}
-    </form>
-  </div>
+    <input type="submit" value="{% trans "Confirm Password" %}" class="submit" />
+    {% if enable_sso %}
+    <button id="shib-login" class="submit fright">SSO</button>
+    {% endif %}
+
+    <div class="sudo-mode-tip">
+        <p><span class="bold">{% trans "Tip:" %}</span>{% trans "You are entering admin area, we won't ask for your password again for a few hours." %}</p>
+    </div>
+</form>
 </div>
 {% endblock %}
 
 {% block extra_script %}
 <script type="text/javascript">
-$('.login-panel-outer-container').prepend($($('#logo').html()).attr({'height': 40}).addClass('login-panel-logo'));
-var $el = $('.login-panel-outer-container');
-var elHeight = $el.outerHeight();
-var wdHeight = $(window).height();
-if (wdHeight > elHeight) {
-  $el.css({'margin-top': (wdHeight - elHeight)/2});
-}
-$el.removeClass('vh');
-
-$('input[name="password"]').trigger('focus');
-
-$('#toggle-show-password').click(function() {
-  $(this).toggleClass('sf3-font-eye-slash sf3-font-eye');
-  if ($(this).hasClass('sf3-font-eye-slash')) {
-    $('#password-input').attr('type', 'password');
-  } else {
-    $('#password-input').attr('type', 'text');
-  }
-});
-
-$('[type="submit"]').on('click', function(){
-    if (!$('input[name="password"]').val().trim()) {
+$('.new-narrow-panel input[name="password"]').trigger('focus');
+$('input[type="submit"]').on('click', function(){
+    if (!$.trim($('input[name="password"]').val())) {
         $('.error').removeClass('hide').html("{% trans "Password cannot be blank" %}");
         return false;
     }
+});
+// set tabindex
+$(function() {
+    $('input:not([type="hidden"])').each(function(index) {
+        $(this).attr('tabindex', index + 1);
+    });
 });
 
 {% if enable_sso %}
@@ -80,5 +51,6 @@ $(function() {
     });
 });
 {% endif %}
+
 </script>
 {% endblock %}

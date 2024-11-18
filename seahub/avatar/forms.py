@@ -4,7 +4,7 @@ import os
 from django import forms
 from django.forms import widgets
 from django.utils.safestring import mark_safe
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ugettext_lazy as _
 
 from seahub.avatar.models import Avatar
 from seahub.avatar.settings import (AVATAR_MAX_AVATARS_PER_USER, AVATAR_MAX_SIZE,
@@ -16,7 +16,7 @@ def avatar_img(avatar, size):
     if not avatar.thumbnail_exists(size):
         avatar.create_thumbnail(size)
     return mark_safe("""<img src="%s" alt="%s" width="%s" height="%s" />""" % 
-        (avatar.avatar_url(size), str(avatar), size, size))
+        (avatar.avatar_url(size), unicode(avatar), size, size))
 
 class UploadAvatarForm(forms.Form):
 
@@ -40,7 +40,7 @@ class UploadAvatarForm(forms.Form):
         if AVATAR_MAX_AVATARS_PER_USER > 1 and \
            count >= AVATAR_MAX_AVATARS_PER_USER: 
             raise forms.ValidationError(
-                _("You already have %(nb_avatars)d avatars, and the maximum allowed is %(nb_max_avatars)d.") %
+                _(u"You already have %(nb_avatars)d avatars, and the maximum allowed is %(nb_max_avatars)d.") %
                 { 'nb_avatars' : count, 'nb_max_avatars' : AVATAR_MAX_AVATARS_PER_USER})
         return        
 

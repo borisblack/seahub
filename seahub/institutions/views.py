@@ -2,14 +2,14 @@
 import json
 import logging
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.contrib import messages
 from django.http import HttpResponseRedirect, HttpResponse
 from django.shortcuts import render
 
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 import seaserv
-from seaserv import seafile_api, ccnet_api
+from seaserv import seafile_api
 from pysearpc import SearpcError
 
 from seahub.auth.decorators import login_required_ajax
@@ -23,8 +23,7 @@ from seahub.profile.models import Profile, DetailedProfile
 from seahub.utils import is_valid_username
 from seahub.utils.rpc import mute_seafile_api
 from seahub.utils.file_size import get_file_size_unit
-from seahub.views.sysadmin import email_user_on_activation
-from seahub.institutions.models import InstitutionAdmin
+from seahub.views.sysadmin import email_user_on_activation, populate_user_info
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,6 @@ def _populate_user_quota_usage(user):
         user.space_usage = -1
         user.space_quota = -1
 
-
 @inst_admin_required
 def info(request):
     """List instituion info.
@@ -52,17 +50,6 @@ def info(request):
 
     return render(request, 'institutions/info.html', {
         'inst': inst,
-    })
-
-@inst_admin_required
-def useradmin_react_fake_view(request, **kwargs):
-    """List users in the institution.
-    """
-    # Make sure page request is an int. If not, deliver first page.
-    inst = request.user.institution
-
-    return render(request, 'institutions/admin.html', {
-        'institution': inst.name,
     })
 
 @inst_admin_required
@@ -84,18 +71,14 @@ def useradmin(request):
         page_next = True
     else:
         page_next = False
-
     users = [User.objects.get(x) for x in usernames[:per_page]]
-    admin_emails = [user.user for user in InstitutionAdmin.objects.filter(institution=inst)]
+
     last_logins = UserLastLogin.objects.filter(username__in=[x.username for x in users])
-
     for u in users:
-
-        u.is_institution_admin = u.email in admin_emails
-
         if u.username == request.user.username:
             u.is_self = True
 
+        populate_user_info(u)
         _populate_user_quota_usage(u)
 
         for e in last_logins:
@@ -112,7 +95,6 @@ def useradmin(request):
         'page_next': page_next,
     })
 
-
 @inst_admin_required
 def useradmin_search(request):
     """Search users in the institution.
@@ -126,16 +108,13 @@ def useradmin_search(request):
     profiles = Profile.objects.filter(institution=inst.name)
     usernames = [x.user for x in profiles if q in x.user]
     users = [User.objects.get(x) for x in usernames]
-    admin_emails = [user.user for user in InstitutionAdmin.objects.filter(institution=inst)]
+
     last_logins = UserLastLogin.objects.filter(username__in=[x.username for x in users])
-
     for u in users:
-
-        u.is_institution_admin = u.email in admin_emails
-
         if u.username == request.user.username:
             u.is_self = True
 
+        populate_user_info(u)
         _populate_user_quota_usage(u)
 
         for e in last_logins:
@@ -148,7 +127,6 @@ def useradmin_search(request):
         'q': q,
     })
 
-
 @inst_admin_required
 @inst_admin_can_manage_user
 def user_info(request, email):
@@ -157,7 +135,7 @@ def user_info(request, email):
 
     owned_repos = mute_seafile_api.get_owned_repo_list(email,
                                                        ret_corrupted=True)
-    owned_repos = [r for r in owned_repos if not r.is_virtual]
+    owned_repos = filter(lambda r: not r.is_virtual, owned_repos)
 
     in_repos = mute_seafile_api.get_share_in_repo_list(email, -1, -1)
     space_usage = mute_seafile_api.get_user_self_usage(email)
@@ -168,7 +146,7 @@ def user_info(request, email):
     d_profile = DetailedProfile.objects.get_detailed_profile_by_user(email)
 
     try:
-        personal_groups = ccnet_api.get_groups(email)
+        personal_groups = seaserv.get_personal_groups_by_user(email)
     except SearpcError as e:
         logger.error(e)
         personal_groups = []
@@ -189,20 +167,18 @@ def user_info(request, email):
 
     available_quota = get_institution_available_quota(request.user.institution)
 
-    return render(request,
-                  'institutions/user_info.html',
-                  {
-                      'owned_repos': owned_repos,
-                      'space_quota': space_quota,
-                      'space_usage': space_usage,
-                      'in_repos': in_repos,
-                      'email': email,
-                      'profile': profile,
-                      'd_profile': d_profile,
-                      'personal_groups': personal_groups,
-                      'available_quota': available_quota,
-                  })
-
+    return render(request, 
+        'institutions/user_info.html', {
+            'owned_repos': owned_repos,
+            'space_quota': space_quota,
+            'space_usage': space_usage,
+            'in_repos': in_repos,
+            'email': email,
+            'profile': profile,
+            'd_profile': d_profile,
+            'personal_groups': personal_groups,
+            'available_quota': available_quota,
+        })
 
 @require_POST
 @inst_admin_required
@@ -210,23 +186,17 @@ def user_info(request, email):
 def user_remove(request, email):
     """Remove a institution user.
     """
-    referer = request.headers.get('referer', None)
-    next_page = reverse('institutions:useradmin') if referer is None else referer
+    referer = request.META.get('HTTP_REFERER', None)
+    next = reverse('institutions:useradmin') if referer is None else referer
 
     try:
         user = User.objects.get(email=email)
+        user.delete()
+        messages.success(request, _(u'Successfully deleted %s') % user.username)
     except User.DoesNotExist:
-        messages.error(request, _('Failed to delete: the user does not exist'))
-        return HttpResponseRedirect(next_page)
+        messages.error(request, _(u'Failed to delete: the user does not exist'))
 
-    if user.is_staff:
-        messages.error(request, _('Failed to delete: the user is system administrator'))
-        return HttpResponseRedirect(next_page)
-
-    user.delete()
-    messages.success(request, _('Successfully deleted %s') % user.username)
-    return HttpResponseRedirect(next_page)
-
+    return HttpResponseRedirect(next)
 
 @login_required_ajax
 @require_POST
@@ -240,13 +210,13 @@ def user_set_quota(request, email):
     available_quota = get_institution_available_quota(request.user.institution)
     if available_quota < quota:
         result = {}
-        result['error'] = 'Failed to set quota: maximum quota is %d MB' % (available_quota / 10 ** 6)
+        result['error'] = _(u'Failed to set quota: maximum quota is %d MB' % \
+                            (available_quota / 10 ** 6))
         return HttpResponse(json.dumps(result), status=400, content_type=content_type)
 
     seafile_api.set_user_quota(email, quota)
 
     return HttpResponse(json.dumps({'success': True}), content_type=content_type)
-
 
 @login_required_ajax
 @require_POST
@@ -289,3 +259,4 @@ def user_toggle_status(request, email):
     except User.DoesNotExist:
         return HttpResponse(json.dumps({'success': False}), status=500,
                             content_type=content_type)
+

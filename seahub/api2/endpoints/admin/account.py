@@ -3,7 +3,7 @@ import logging
 from dateutil.relativedelta import relativedelta
 
 from django.utils import timezone
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAdminUser
@@ -11,10 +11,8 @@ from rest_framework.response import Response
 from rest_framework.reverse import reverse
 from rest_framework.views import APIView
 import seaserv
-from seaserv import seafile_api, ccnet_threaded_rpc, ccnet_api
+from seaserv import seafile_api, ccnet_threaded_rpc
 
-from seahub.admin_log.models import USER_MIGRATE
-from seahub.admin_log.signals import admin_operation
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.serializers import AccountSerializer
 from seahub.api2.throttling import UserRateThrottle
@@ -23,7 +21,6 @@ from seahub.base.accounts import User
 from seahub.base.templatetags.seahub_tags import email2nickname
 from seahub.profile.models import Profile, DetailedProfile
 from seahub.institutions.models import Institution
-from seahub.share.models import UploadLinkShare, FileShare
 from seahub.utils import is_valid_username, is_org_context
 from seahub.utils.file_size import get_file_size_unit
 from seahub.group.utils import is_group_member
@@ -95,13 +92,8 @@ class Account(APIView):
             for r in seafile_api.get_owned_repo_list(from_user):
                 seafile_api.set_repo_owner(r.id, user2.username)
 
-            # transfer shared repos to new user
-            for r in seafile_api.get_share_in_repo_list(from_user, -1, -1):
-                owner = seafile_api.get_repo_owner(r.repo_id)
-                seafile_api.share_repo(r.repo_id, owner, to_user, r.permission)
-
             # transfer joined groups to new user
-            for g in ccnet_api.get_groups(from_user):
+            for g in seaserv.get_personal_groups_by_user(from_user):
                 if not is_group_member(g.id, user2.username):
                     # add new user to the group on behalf of the group creator
                     ccnet_threaded_rpc.group_add_member(g.id, g.creator_name,
@@ -110,21 +102,6 @@ class Account(APIView):
                 if from_user == g.creator_name:
                     ccnet_threaded_rpc.set_group_creator(g.id, to_user)
 
-            # reshare repo to links
-            try:
-                UploadLinkShare.objects.filter(username=from_user).update(username=to_user)
-                FileShare.objects.filter(username=from_user).update(username=to_user)
-            except Exception as e:
-                logger.error(e)
-                error_msg = 'Internal Server Error'
-                return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-            
-            admin_op_detail = {
-                "from": from_user,
-                "to": to_user
-            }
-            admin_operation.send(sender=None, admin_name=request.user.username,
-                                 operation=USER_MIGRATE, detail=admin_op_detail)
             return Response({'success': True})
         else:
             return api_error(status.HTTP_400_BAD_REQUEST, 'op can only be migrate.')
@@ -189,6 +166,20 @@ class Account(APIView):
             profile.institution = institution
             profile.save()
 
+        # update is_trial
+        is_trial = request.data.get("is_trial", None)
+        if is_trial is not None:
+            try:
+                from seahub_extra.trialaccount.models import TrialAccount
+            except ImportError:
+                pass
+            else:
+                if is_trial is True:
+                    expire_date = timezone.now() + relativedelta(days=7)
+                    TrialAccount.object.create_or_update(email, expire_date)
+                else:
+                    TrialAccount.objects.filter(user_or_org=email).delete()
+
     def put(self, request, email, format=None):
 
         # argument check for email
@@ -201,11 +192,11 @@ class Account(APIView):
         if name is not None:
             if len(name) > 64:
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                        _('Name is too long (maximum is 64 characters)'))
+                        _(u'Name is too long (maximum is 64 characters)'))
 
             if "/" in name:
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                        _("Name should not include '/'."))
+                        _(u"Name should not include '/'."))
 
         # argument check for list_in_address_book
         list_in_address_book = request.data.get("list_in_address_book", None)
@@ -220,18 +211,18 @@ class Account(APIView):
             loginid = loginid.strip()
             if loginid == "":
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                            _("Login id can't be empty"))
+                            _(u"Login id can't be empty"))
             usernamebyloginid = Profile.objects.get_username_by_login_id(loginid)
             if usernamebyloginid is not None:
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                          _("Login id %s already exists." % loginid))
+                          _(u"Login id %s already exists." % loginid))
 
         # argument check for department
         department = request.data.get("department", None)
         if department is not None:
             if len(department) > 512:
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                        _('Department is too long (maximum is 512 characters)'))
+                        _(u'Department is too long (maximum is 512 characters)'))
 
         # argument check for institution
         institution = request.data.get("institution", None)
@@ -257,7 +248,7 @@ class Account(APIView):
 
             if space_quota_mb < 0:
                 return api_error(status.HTTP_400_BAD_REQUEST,
-                        'Space quota is too low (minimum value is 0)')
+                        _('Space quota is too low (minimum value is 0)'))
 
             if is_org_context(request):
                 org_id = request.user.org.org_id
@@ -265,7 +256,7 @@ class Account(APIView):
                         get_file_size_unit('MB')
                 if space_quota_mb > org_quota_mb:
                     return api_error(status.HTTP_400_BAD_REQUEST, \
-                            'Failed to set quota: maximum quota is %d MB' % org_quota_mb)
+                            _(u'Failed to set quota: maximum quota is %d MB' % org_quota_mb))
 
         # argument check for is_trial
         is_trial = request.data.get("is_trial", None)
@@ -300,13 +291,6 @@ class Account(APIView):
                             'is_active invalid.')
 
                 user.is_active = is_active
-                if is_active == False:
-                    # del tokens and personal repo api tokens (not department)
-                    from seahub.utils import inactive_user
-                    try:
-                        inactive_user(email)
-                    except Exception as e:
-                        logger.error("Failed to inactive_user %s: %s." % (email, e))
 
             # update password
             password = request.data.get("password", None)
@@ -319,7 +303,6 @@ class Account(APIView):
                 return api_error(status.HTTP_520_OPERATION_FAILED,
                                  'Failed to update user.')
 
-            email = user.email
             try:
                 # update account additional info
                 self._update_account_additional_info(request, email)
@@ -350,7 +333,6 @@ class Account(APIView):
                 return api_error(status.HTTP_520_OPERATION_FAILED,
                                  'Failed to add user.')
 
-            email = user.email
             try:
                 # update account additional info
                 self._update_account_additional_info(request, email)

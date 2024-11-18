@@ -2,12 +2,13 @@
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage, get_storage_class
-from urllib.parse import quote
+from django.utils.http import urlquote
 
 from seahub.base.accounts import User
 from seahub.avatar.settings import AVATAR_DEFAULT_URL, AVATAR_CACHE_TIMEOUT,\
-    AVATAR_DEFAULT_SIZE, AVATAR_DEFAULT_NON_REGISTERED_URL, \
-    AUTO_GENERATE_GROUP_AVATAR_SIZES, AVATAR_FILE_STORAGE
+    AUTO_GENERATE_AVATAR_SIZES, AVATAR_DEFAULT_SIZE, \
+    AVATAR_DEFAULT_NON_REGISTERED_URL, AUTO_GENERATE_GROUP_AVATAR_SIZES, \
+    AVATAR_FILE_STORAGE
 
 cached_funcs = set()
 
@@ -17,7 +18,7 @@ def get_cache_key(user_or_username, size, prefix):
     """
     if isinstance(user_or_username, User):
         user_or_username = user_or_username.username
-    return '%s_%s_%s' % (prefix, quote(user_or_username), size)
+    return '%s_%s_%s' % (prefix, urlquote(user_or_username), size)
 
 def get_grp_cache_key(group_id, size):
     """
@@ -34,7 +35,7 @@ def cache_result(func):
         cache.set(key, value, AVATAR_CACHE_TIMEOUT)
         return value
 
-    def cached_func(user, size=AVATAR_DEFAULT_SIZE):
+    def cached_func(user, size):
         prefix = func.__name__
         cached_funcs.add(prefix)
         key = get_cache_key(user, size, prefix=prefix)
@@ -45,7 +46,7 @@ def invalidate_cache(user, size=None):
     """
     Function to be called when saving or changing an user's avatars.
     """
-    sizes = {AVATAR_DEFAULT_SIZE}
+    sizes = set(AUTO_GENERATE_AVATAR_SIZES)
     if size is not None:
         sizes.add(size)
     for prefix in cached_funcs:
@@ -120,9 +121,11 @@ def get_avatar_file_storage():
     else:
         dbs_options = {
             'table': 'avatar_uploaded',
-            'base_url': '/image-view/',
+            'base_url': '%simage-view/' % settings.SITE_ROOT,
             'name_column': 'filename',
             'data_column': 'data',
             'size_column': 'size',
             }
         return get_storage_class(AVATAR_FILE_STORAGE)(options=dbs_options)
+    
+    

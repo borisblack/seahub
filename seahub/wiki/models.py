@@ -1,13 +1,12 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 from django.db import models
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ugettext_lazy as _
 from seaserv import seafile_api
 
 from seahub.base.fields import LowerCaseCharField
 from seahub.base.templatetags.seahub_tags import email2nickname
-from seahub.avatar.templatetags.avatar_tags import api_avatar_url
 from seahub.utils import get_site_scheme_and_netloc
 from seahub.utils.timeutils import (timestamp_to_isoformat_timestr,
                                     datetime_to_isoformat_timestr)
@@ -17,6 +16,43 @@ class WikiDoesNotExist(Exception):
 
 class WikiPageMissing(Exception):
     pass
+
+class PersonalWikiManager(models.Manager):
+    def save_personal_wiki(self, username, repo_id):
+        """
+        Create or update group wiki.
+        """
+        try:
+            wiki = self.get(username=username)
+            wiki.repo_id = repo_id
+        except self.model.DoesNotExist:
+            wiki = self.model(username=username, repo_id=repo_id)
+        wiki.save(using=self._db)
+        return wiki
+
+class PersonalWiki(models.Model):
+    username = LowerCaseCharField(max_length=255, unique=True)
+    repo_id = models.CharField(max_length=36)
+    objects = PersonalWikiManager()
+
+class GroupWikiManager(models.Manager):
+    def save_group_wiki(self, group_id, repo_id):
+        """
+        Create or update group wiki.
+        """
+        try:
+            groupwiki = self.get(group_id=group_id)
+            groupwiki.repo_id = repo_id
+        except self.model.DoesNotExist:
+            groupwiki = self.model(group_id=group_id, repo_id=repo_id)
+        groupwiki.save(using=self._db)
+        return groupwiki
+
+class GroupWiki(models.Model):
+    group_id = models.IntegerField(unique=True)
+    repo_id = models.CharField(max_length=36)
+    objects = GroupWikiManager()
+
 
 class DuplicateWikiNameError(Exception):
     pass
@@ -35,10 +71,12 @@ class WikiManager(models.Manager):
 
         now = timezone.now()
         if repo_id is None:     # create new repo to store the wiki pages
-            if org_id and org_id > 0:
-                repo_id = seafile_api.create_org_repo(wiki_name, '', username, org_id)
+            if org_id > 0:
+                repo_id = seafile_api.create_org_repo(wiki_name, '', username,
+                                                      passwd=None, org_id=org_id)
             else:
-                repo_id = seafile_api.create_repo(wiki_name, '', username)
+                repo_id = seafile_api.create_repo(wiki_name, '', username,
+                                                  passwd=None)
 
         repo = seafile_api.get_repo(repo_id)
         assert repo is not None
@@ -57,13 +95,14 @@ class Wiki(models.Model):
     PERM_CHOICES = (
         ('private', 'private'),
         ('public', 'public'),
+        ('login-user', 'login user')
     )
 
     username = LowerCaseCharField(max_length=255)
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=255, unique=True)
     repo_id = models.CharField(max_length=36, db_index=True)
-    permission = models.CharField(max_length=50)  # private, public
+    permission = models.CharField(max_length=50)  # private, public, login
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     objects = WikiManager()
 
@@ -86,32 +125,35 @@ class Wiki(models.Model):
 
         return repo.last_modify
 
-    def has_read_perm(self, request):
-        from seahub.views import check_folder_permission
+    def has_read_perm(self, user):
         if self.permission == 'public':
             return True
-        else:   # private
-            if not request.user.is_authenticated:
-                return False
-            repo_perm = check_folder_permission(request, self.repo_id, '/')
-            if not repo_perm:
-                return False
+        elif self.permission == 'login-user':
+            return True if user.is_authenticated() else False
+        else:                   # private
+            return True if user.username == self.username else False
+
+    def check_access_wiki(self, request):
+        from seahub.views import check_folder_permission
+
+        if request.user.is_authenticated() and check_folder_permission(
+                request, self.repo_id, '/') is not None:
             return True
+        else:
+            return False
+
 
     def to_dict(self):
-        avatar_url, is_default, date_uploaded = api_avatar_url(self.username)
         return {
             'id': self.pk,
             'owner': self.username,
             'owner_nickname': email2nickname(self.username),
-            'owner_avatar_url': avatar_url,
             'name': self.name,
             'slug': self.slug,
             'link': self.link,
             'permission': self.permission,
             'created_at': datetime_to_isoformat_timestr(self.created_at),
             'updated_at': timestamp_to_isoformat_timestr(self.updated_at),
-            'repo_id': self.repo_id,
         }
 
 
@@ -120,7 +162,8 @@ from django.dispatch import receiver
 from seahub.signals import repo_deleted
 
 @receiver(repo_deleted)
-def remove_wiki(sender, **kwargs):
+def remove_personal_wiki(sender, **kwargs):
+    repo_owner = kwargs['repo_owner']
     repo_id = kwargs['repo_id']
 
-    Wiki.objects.filter(repo_id=repo_id).delete()
+    PersonalWiki.objects.filter(username=repo_owner, repo_id=repo_id).delete()

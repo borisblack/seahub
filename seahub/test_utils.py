@@ -4,7 +4,7 @@ import os
 from uuid import uuid4
 
 from django.core.cache import cache
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.conf import settings
 from django.http import SimpleCookie
 from django.test import RequestFactory
@@ -22,8 +22,6 @@ from seahub.utils.file_size import get_file_size_unit
 from seahub.base.templatetags.seahub_tags import email2nickname,\
         email2contact_email
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
-from seahub.role_permissions.models import AdminRole
-
 
 TRAVIS = 'TRAVIS' in os.environ
 
@@ -57,60 +55,6 @@ class Fixtures(Exam):
     @fixture
     def admin(self):
         return self.create_user('admin@test.com', is_staff=True)
-
-    @fixture
-    def admin_cannot_view_system_info(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_view_system_info')
-        return user
-
-    @fixture
-    def admin_cannot_view_statistic(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_view_statistic')
-        return user
-
-    @fixture
-    def admin_cannot_config_system(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_config_system')
-        return user
-
-    @fixture
-    def admin_cannot_manage_library(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_manage_library')
-        return user
-
-    @fixture
-    def admin_cannot_manage_user(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_manage_user')
-        return user
-
-    @fixture
-    def admin_cannot_manage_group(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_manage_group')
-        return user
-
-    @fixture
-    def admin_cannot_view_user_log(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_view_user_log')
-        return user
-
-    @fixture
-    def admin_cannot_view_admin_log(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'cannot_view_admin_log')
-        return user
-
-    @fixture
-    def admin_no_other_permission(self):
-        user = self.create_user('admin_no_permission@test.com', is_staff=True)
-        AdminRole.objects.add_admin_role(user.username, 'no_other_permission')
-        return user
 
     @fixture
     def repo(self):
@@ -185,13 +129,11 @@ class Fixtures(Exam):
         if not email:
             email = uuid4().hex + '@test.com'
 
-        user = User(email=email)
-        user.is_staff = kwargs.get('is_staff', False)
-        user.is_active = kwargs.get('is_active', True)
-        user.set_password('secret')
-        user.save()
+        kwargs.setdefault('email', email)
+        kwargs.setdefault('is_staff', False)
+        kwargs.setdefault('is_active', True)
 
-        return User.objects.get(email)
+        return User.objects.create_user(password='secret', **kwargs)
 
     def remove_user(self, email=None):
         if not email:
@@ -200,7 +142,7 @@ class Fixtures(Exam):
             User.objects.get(email).delete()
         except User.DoesNotExist:
             pass
-        for g in ccnet_api.get_groups(email):
+        for g in seaserv.get_personal_groups_by_user(email):
             ccnet_threaded_rpc.remove_group(g.id, email)
 
     def create_repo(self, **kwargs):
@@ -233,7 +175,7 @@ class Fixtures(Exam):
         fd, tmp_file = mkstemp()
 
         try:
-            bytesWritten = os.write(fd, content.encode('utf-8'))
+            bytesWritten = os.write(fd, content)
         except:
             bytesWritten = -1
         finally:
@@ -250,9 +192,8 @@ class Fixtures(Exam):
         return kwargs['parent_dir'] + kwargs['dirname']
 
     def remove_folder(self):
-        import json
         seafile_api.del_file(self.repo.id, os.path.dirname(self.folder),
-                             json.dumps([os.path.basename(self.folder)]), self.user.username)
+                             os.path.basename(self.folder), self.user.username)
 
     def create_group(self, **kwargs):
         group_name = kwargs['group_name']
@@ -263,7 +204,7 @@ class Fixtures(Exam):
     def create_org_group(self, **kwargs):
         group_name = kwargs['group_name']
         username = kwargs['username']
-        org_group_id = ccnet_threaded_rpc.create_org_group(self.org.org_id, group_name, username)
+        org_group_id = ccnet_threaded_rpc.create_org_group(self.org.org_id ,group_name, username)
         org_groups = ccnet_threaded_rpc.get_org_groups(self.org.org_id, -1, -1)
         res_group = None
         for group in org_groups:
@@ -282,14 +223,10 @@ class Fixtures(Exam):
             return new_org
 
         quota = int(quota)
-        user = User(email=username)
-        user.is_staff = False
-        user.is_active = True
-        user.set_password(password)
-        user.save()
+        User.objects.create_user(username, password, is_staff=False, is_active=True)
         create_org(org_name, prefix, username)
         new_org = ccnet_threaded_rpc.get_org_by_url_prefix(prefix)
-        from seahub.organizations.models import OrgMemberQuota
+        from seahub_extra.organizations.models import OrgMemberQuota
         OrgMemberQuota.objects.set_quota(new_org.org_id, member_limit)
         quota = quota * get_file_size_unit('MB')
         seafserv_threaded_rpc.set_org_quota(new_org.org_id, quota)
@@ -301,12 +238,7 @@ class Fixtures(Exam):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            user = User(email=email)
-            user.is_staff = False
-            user.is_active = True
-            user.set_password(password)
-            user.save()
-            user = User.objects.get(email=email)
+            user = User.objects.create_user(email, password, is_staff=False, is_active=True)
         ccnet_api.add_org_user(self.org.org_id, email, 0)
         return user
 
@@ -316,12 +248,7 @@ class Fixtures(Exam):
         try:
             admin = User.objects.get(email=email)
         except User.DoesNotExist:
-            user = User(email=email)
-            user.is_staff = False
-            user.is_active = True
-            user.set_password(password)
-            user.save()
-            admin = User.objects.get(email=email)
+            admin = User.objects.create_user(email, password, is_staff=False, is_active=True)
         ccnet_api.add_org_user(self.org.org_id, email, 1)
         return admin
 
@@ -429,7 +356,7 @@ class BaseTestCase(TestCase, Fixtures):
         self.remove_repo(self.enc_repo.id)
 
     def login_as(self, user, password=None):
-        if isinstance(user, str):
+        if isinstance(user, basestring):
             login = user
         elif isinstance(user, User):
             login = user.username

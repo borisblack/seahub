@@ -2,9 +2,9 @@ from django.dispatch import Signal
 
 
 # A new user has registered.
-user_registered = Signal()
+user_registered = Signal(providing_args=["user", "request"])
 
 # A user has activated his or her account.
-user_activated = Signal()
+user_activated = Signal(providing_args=["user", "request"])
 
-user_deleted = Signal()
+user_deleted = Signal(providing_args=['username'])

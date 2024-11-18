@@ -2,7 +2,7 @@
 import logging
 
 from django.conf import settings
-from django.db import models, IntegrityError
+from django.db import models
 from django.core.cache import cache
 from django.dispatch import receiver
 from django.core.exceptions import MultipleObjectsReturned
@@ -12,18 +12,13 @@ from seahub.profile.settings import EMAIL_ID_CACHE_PREFIX, EMAIL_ID_CACHE_TIMEOU
 from seahub.institutions.models import Institution
 from registration.signals import user_registered
 from seahub.signals import institution_deleted
-from seahub.institutions.models import InstitutionAdmin
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
-class DuplicatedContactEmailError(Exception):
-    pass
-
-
 class ProfileManager(models.Manager):
     def add_or_update(self, username, nickname=None, intro=None, lang_code=None,
-                      login_id=None, contact_email=None, institution=None, list_in_address_book=None):
+                      login_id=None, contact_email=None, institution=None):
         """Add or update user profile.
         """
         try:
@@ -47,14 +42,8 @@ class ProfileManager(models.Manager):
         if institution is not None:
             institution = institution.strip()
             profile.institution = institution
-        if list_in_address_book is not None:
-            profile.list_in_address_book = list_in_address_book.lower() == 'true'
-
-        try:
-            profile.save(using=self._db)
-            return profile
-        except IntegrityError:
-            raise DuplicatedContactEmailError
+        profile.save(using=self._db)
+        return profile
 
     def update_contact_email(self, username, contact_email):
         """
@@ -66,12 +55,8 @@ class ProfileManager(models.Manager):
         except Profile.DoesNotExist:
             logger.warn('%s profile does not exists' % username)
             return None
-
-        try:
-            profile.save(using=self._db)
-            return profile
-        except IntegrityError:
-            raise DuplicatedContactEmailError
+        profile.save(using=self._db)
+        return profile
 
     def get_profile_by_user(self, username):
         """Get a user's profile.
@@ -120,6 +105,10 @@ class ProfileManager(models.Manager):
             return super(ProfileManager, self).get(contact_email=contact_email).user
         except Profile.DoesNotExist:
             return None
+        except MultipleObjectsReturned as e:
+            logger.warn('Failed to get username by contact email: %s' % contact_email)
+            logger.warn(e)
+            return None
 
     def convert_login_str_to_username(self, login_str):
         """
@@ -164,8 +153,7 @@ class Profile(models.Model):
     # Login id can be email or anything else used to login.
     login_id = models.CharField(max_length=225, unique=True, null=True, blank=True)
     # Contact email is used to receive emails.
-    contact_email = models.EmailField(max_length=225, unique=True, null=True, blank=True)
-    is_manually_set_contact_email = models.BooleanField(default=False)
+    contact_email = models.EmailField(max_length=225, db_index=True, null=True, blank=True)
     institution = models.CharField(max_length=225, db_index=True, null=True, blank=True, default='')
     list_in_address_book = models.BooleanField(default=False, db_index=True)
     objects = ProfileManager()
@@ -184,12 +172,8 @@ class DetailedProfileManager(models.Manager):
     def add_or_update(self, username, department, telephone):
         try:
             d_profile = self.get(user=username)
-
-            if department is not None:
-                d_profile.department = department
-            if telephone is not None:
-                d_profile.telephone = telephone
-
+            d_profile.department = department
+            d_profile.telephone = telephone
         except DetailedProfile.DoesNotExist:
             d_profile = self.model(user=username, department=department,
                                    telephone=telephone)
@@ -240,5 +224,4 @@ def update_profile_cache(sender, instance, **kwargs):
 def remove_user_for_inst_deleted(sender, **kwargs):
     inst_name = kwargs.get("inst_name", "")
     Profile.objects.filter(institution=inst_name).update(institution="")
-    InstitutionAdmin.objects.filter(institution__name=inst_name).delete()
 

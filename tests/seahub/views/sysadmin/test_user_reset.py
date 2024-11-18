@@ -1,6 +1,6 @@
 from mock import patch
 from django.core import mail
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 import pytest
 pytestmark = pytest.mark.django_db
 
@@ -32,6 +32,7 @@ class UserResetTest(BaseTestCase):
             reverse('user_reset', args=[self.user.email])
         )
         self.assertEqual(302, resp.status_code)
+        assert 'email has been sent to contact@mail.com' in resp.cookies['messages'].value
 
         self.assertEqual(len(mail.outbox), 1)
         assert mail.outbox[0].to[0] != self.user.username

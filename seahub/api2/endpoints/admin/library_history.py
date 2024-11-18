@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 from pysearpc import SearpcError
 from seaserv import seafile_api
@@ -25,9 +25,6 @@ class AdminLibraryHistoryLimit(APIView):
     throttle_classes = (UserRateThrottle, )
 
     def get(self, request, repo_id, format=None):
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -49,16 +46,15 @@ class AdminLibraryHistoryLimit(APIView):
 
     def put(self, request, repo_id, format=None):
 
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         repo = seafile_api.get_repo(repo_id)
         if not repo:
             error_msg = 'Library %s not found.' % repo_id
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # no settings for virtual repo
-        if repo.is_virtual:
+        if repo.is_virtual or \
+            not config.ENABLE_REPO_HISTORY_SETTING:
+
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 

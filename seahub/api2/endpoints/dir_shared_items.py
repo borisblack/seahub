@@ -9,7 +9,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 import seaserv
 from seaserv import seafile_api, ccnet_api
@@ -21,24 +21,19 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.api2.endpoints.utils import is_org_user
 
-from seahub.base.templatetags.seahub_tags import email2nickname, \
-        email2contact_email
+from seahub.base.templatetags.seahub_tags import email2nickname
 from seahub.base.accounts import User
-from seahub.group.utils import is_group_member, is_group_admin
+from seahub.group.utils import is_group_member
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.utils import is_repo_admin, share_dir_to_user, \
         share_dir_to_group, update_user_dir_permission, \
         update_group_dir_permission, check_user_share_out_permission, \
-        check_group_share_out_permission, normalize_custom_permission_name
+        check_group_share_out_permission
 from seahub.utils import (is_org_context, is_valid_username,
                           send_perm_audit_msg)
-from seahub.share.signals import share_repo_to_user_successful, share_repo_to_group_successful, \
-    change_repo_perm_successful, delete_repo_perm_successful
+from seahub.share.signals import share_repo_to_user_successful, share_repo_to_group_successful
 from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, \
         PERMISSION_ADMIN
-from seahub.utils.repo import get_available_repo_perms
-from seahub.avatar.templatetags.avatar_tags import api_avatar_url
-from seahub.settings import ENABLE_SHARE_TO_DEPARTMENT
 
 
 logger = logging.getLogger(__name__)
@@ -61,13 +56,10 @@ class DirSharedItemsEndpoint(APIView):
             org_id = request.user.org.org_id
             if path == '/':
                 share_items = seafile_api.list_org_repo_shared_to(org_id,
-                                                                  repo_owner,
-                                                                  repo_id)
+                        repo_owner, repo_id)
             else:
                 share_items = seafile_api.get_org_shared_users_for_subdir(org_id,
-                                                                          repo_id,
-                                                                          path,
-                                                                          repo_owner)
+                        repo_id, path, repo_owner)
         else:
             repo_owner = seafile_api.get_repo_owner(repo_id)
             if path == '/':
@@ -80,14 +72,11 @@ class DirSharedItemsEndpoint(APIView):
         admin_users = ExtraSharePermission.objects.get_admin_users_by_repo(repo_id)
         ret = []
         for item in share_items:
-            avatar_url, is_default, date_uploaded = api_avatar_url(item.user)
             ret.append({
                 "share_type": "user",
                 "user_info": {
                     "name": item.user,
                     "nickname": email2nickname(item.user),
-                    "contact_email": email2contact_email(item.user),
-                    "avatar_url": avatar_url,
                 },
                 "permission": item.perm,
                 "is_admin": item.user in admin_users
@@ -101,13 +90,10 @@ class DirSharedItemsEndpoint(APIView):
             org_id = request.user.org.org_id
             if path == '/':
                 share_items = seafile_api.list_org_repo_shared_group(org_id,
-                                                                     repo_owner,
-                                                                     repo_id)
+                        repo_owner, repo_id)
             else:
                 share_items = seafile_api.get_org_shared_groups_for_subdir(org_id,
-                                                                           repo_id,
-                                                                           path,
-                                                                           repo_owner)
+                        repo_id, path, repo_owner)
         else:
             repo_owner = seafile_api.get_repo_owner(repo_id)
             if path == '/':
@@ -120,10 +106,6 @@ class DirSharedItemsEndpoint(APIView):
         admin_groups = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
         for item in share_items:
 
-            if '@seafile_group' in repo_owner and \
-                    repo_owner.split('@')[0] == str(item.group_id):
-                continue
-
             group_id = item.group_id
             group = ccnet_api.get_group(group_id)
             if not group:
@@ -135,10 +117,11 @@ class DirSharedItemsEndpoint(APIView):
                                 org_id, repo_id, path, repo_owner, group_id)
                 else:
                     if path == '/':
-                        seafile_api.unset_group_repo(repo_id, group_id, repo_owner)
+                        seafile_api.unset_group_repo(repo_id, group_id,
+                                repo_owner)
                     else:
-                        seafile_api.unshare_subdir_for_group(repo_id, path,
-                                                             repo_owner, group_id)
+                        seafile_api.unshare_subdir_for_group(
+                                repo_id, path, repo_owner, group_id)
                 continue
 
             ret.append({
@@ -225,9 +208,6 @@ class DirSharedItemsEndpoint(APIView):
     def post(self, request, repo_id, format=None):
         """Update shared item permission.
         """
-        if not request.user.permissions.can_share_repo():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         username = request.user.username
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -238,10 +218,8 @@ class DirSharedItemsEndpoint(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Folder %s not found.' % path)
 
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in get_available_repo_perms():
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                return api_error(status.HTTP_400_BAD_REQUEST, 'permission invalid.')
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN]:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'permission invalid.')
 
         repo_owner = self.get_repo_owner(request, repo_id)
         if repo_owner != username and not is_repo_admin(username, repo_id):
@@ -268,19 +246,6 @@ class DirSharedItemsEndpoint(APIView):
                 repo_owner = seafile_api.get_repo_owner(repo_id)
 
                 update_user_dir_permission(repo_id, path, repo_owner, shared_to, permission)
-
-            org_id = None
-            if is_org_context(request):
-                org_id = request.user.org.org_id
-            change_repo_perm_successful.send(
-                sender=None,
-                from_user=username,
-                to_user=shared_to,
-                repo=repo,
-                path=path,
-                permission=permission,
-                org_id=org_id
-            )
 
             send_perm_audit_msg('modify-repo-perm', username, shared_to,
                                 repo_id, path, permission)
@@ -313,10 +278,6 @@ class DirSharedItemsEndpoint(APIView):
                             content_type=json_content_type)
 
     def put(self, request, repo_id, format=None):
-
-        if not request.user.permissions.can_share_repo():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         username = request.user.username
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -338,10 +299,8 @@ class DirSharedItemsEndpoint(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         permission = request.data.get('permission', PERMISSION_READ)
-        if permission not in get_available_repo_perms():
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                return api_error(status.HTTP_400_BAD_REQUEST, 'permission invalid.')
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN]:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'permission invalid.')
 
         result = {}
         result['failed'] = []
@@ -353,7 +312,7 @@ class DirSharedItemsEndpoint(APIView):
                 if not is_valid_username(to_user):
                     result['failed'].append({
                         'email': to_user,
-                        'error_msg': _('username invalid.')
+                        'error_msg': _(u'username invalid.')
                         })
                     continue
 
@@ -362,14 +321,14 @@ class DirSharedItemsEndpoint(APIView):
                 except User.DoesNotExist:
                     result['failed'].append({
                         'email': to_user,
-                        'error_msg': _('User %s not found.') % to_user
+                        'error_msg': _(u'User %s not found.') % to_user
                         })
                     continue
 
                 if self.has_shared_to_user(request, repo_id, path, to_user):
                     result['failed'].append({
                         'email': to_user,
-                        'error_msg': _('This item has been shared to %s.') % email2nickname(to_user)
+                        'error_msg': _(u'This item has been shared to %s.') % to_user
                         })
                     continue
 
@@ -380,7 +339,8 @@ class DirSharedItemsEndpoint(APIView):
 
                         if not is_org_user(to_user, int(org_id)):
                             org_name = request.user.org.org_name
-                            error_msg = f'User {to_user} is not member of organization {org_name}.'
+                            error_msg = 'User %s is not member of organization %s.' \
+                                    % (to_user, org_name)
 
                             result['failed'].append({
                                 'email': to_user,
@@ -388,8 +348,7 @@ class DirSharedItemsEndpoint(APIView):
                             })
                             continue
 
-                        # when calling seafile API to share authority related functions,
-                        # change the uesrname to repo owner.
+                        # when calling seafile API to share authority related functions, change the uesrname to repo owner.
                         repo_owner = seafile_api.get_org_repo_owner(repo_id)
                         # can't share to owner
                         if to_user == repo_owner:
@@ -414,14 +373,11 @@ class DirSharedItemsEndpoint(APIView):
 
                         share_dir_to_user(repo, path, repo_owner, username, to_user, permission, None)
 
-                    avatar_url, is_default, date_uploaded = api_avatar_url(to_user)
                     result['success'].append({
                         "share_type": "user",
                         "user_info": {
                             "name": to_user,
                             "nickname": email2nickname(to_user),
-                            "contact_email": email2contact_email(to_user),
-                            "avatar_url": avatar_url,
                         },
                         "permission": PERMISSION_READ_WRITE if permission == PERMISSION_ADMIN else permission,
                         "is_admin": permission == PERMISSION_ADMIN
@@ -468,29 +424,17 @@ class DirSharedItemsEndpoint(APIView):
                         })
                     continue
 
-                # is sharing repo to department
-                if group.parent_group_id != 0:
-
-                    if not ENABLE_SHARE_TO_DEPARTMENT or \
-                            ENABLE_SHARE_TO_DEPARTMENT and not is_group_admin(gid, username):
-                        result['failed'].append({
-                            'group_name': group.group_name,
-                            'error_msg': 'Permission denied.'
-                            })
-                        continue
-
                 if self.has_shared_to_group(request, repo_id, path, gid):
                     result['failed'].append({
                         'group_name': group.group_name,
-                        'error_msg': _('This item has been shared to %s.') % group.group_name
+                        'error_msg': _(u'This item has been shared to %s.') % group.group_name
                         })
                     continue
 
                 try:
                     org_id = None
                     if is_org_context(request):
-                        # when calling seafile API to share authority related functions,
-                        # change the uesrname to repo owner.
+                        # when calling seafile API to share authority related functions, change the uesrname to repo owner.
                         repo_owner = seafile_api.get_org_repo_owner(repo_id)
                         org_id = request.user.org.org_id
 
@@ -526,14 +470,9 @@ class DirSharedItemsEndpoint(APIView):
                     continue
 
         return HttpResponse(json.dumps(result),
-                            status=200,
-                            content_type=json_content_type)
+            status=200, content_type=json_content_type)
 
     def delete(self, request, repo_id, format=None):
-
-        if not request.user.permissions.can_share_repo():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         username = request.user.username
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -574,20 +513,8 @@ class DirSharedItemsEndpoint(APIView):
 
             # Delete share permission at ExtraSharePermission table.
             if path == '/':
-                ExtraSharePermission.objects.delete_share_permission(repo_id,
+                ExtraSharePermission.objects.delete_share_permission(repo_id, 
                                                                      shared_to)
-
-            org_id = None
-            if is_org_context(request):
-                org_id = request.user.org.org_id
-            delete_repo_perm_successful.send(
-                sender=None,
-                from_user=username,
-                to_user=shared_to,
-                repo=repo,
-                path=path,
-                org_id=org_id
-            )
             send_perm_audit_msg('delete-repo-perm', username, shared_to,
                                 repo_id, path, permission)
 
@@ -619,8 +546,8 @@ class DirSharedItemsEndpoint(APIView):
 
             # delete share permission if repo is deleted
             if path == '/':
-                ExtraGroupsSharePermission.objects.delete_share_permission(repo_id,
-                                                                           group_id)
+                ExtraGroupsSharePermission.objects.delete_share_permission(repo_id, 
+                                                                          group_id)
             send_perm_audit_msg('delete-repo-perm', username, group_id,
                                 repo_id, path, permission)
 

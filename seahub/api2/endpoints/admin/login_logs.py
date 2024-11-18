@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 
 from seaserv import ccnet_api
 
@@ -32,9 +32,6 @@ class LoginLogs(APIView):
 
     def get(self, request):
 
-        if not request.user.admin_permissions.can_view_admin_log():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         # check the date format, should be like '2015-10-10'
         start = request.GET.get('start', None)
         end = request.GET.get('end', None)
@@ -48,7 +45,7 @@ class LoginLogs(APIView):
         end = end + ' 23:59:59'
 
         result = []
-        from seahub.sysadmin_extra.models import UserLoginLog
+        from seahub_extra.sysadmin_extra.models import UserLoginLog
         logs = UserLoginLog.objects.filter(login_date__range=(start, end))
         for log in logs:
             result.append({
@@ -100,9 +97,6 @@ class AdminLoginLogs(APIView):
 
     def get(self, request):
 
-        if not request.user.admin_permissions.can_view_admin_log():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         try:
             page = int(request.GET.get('page', '1'))
             per_page = int(request.GET.get('per_page', '100'))
@@ -120,7 +114,7 @@ class AdminLoginLogs(APIView):
 
         offset = per_page * (page -1)
 
-        from seahub.sysadmin_extra.models import UserLoginLog
+        from seahub_extra.sysadmin_extra.models import UserLoginLog
         admin_user_emails = self._get_admin_user_emails()
         all_logs = UserLoginLog.objects.filter(username__in=admin_user_emails)
 

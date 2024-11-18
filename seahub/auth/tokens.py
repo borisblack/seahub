@@ -1,10 +1,11 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 from datetime import date
+from django.conf import settings
 from django.utils.http import int_to_base36, base36_to_int
 from django.utils.crypto import constant_time_compare, salted_hmac
-import six
-from seahub.base.models import UserLastLogin
+from django.utils import six
 
+from seahub.base.models import UserLastLogin
 
 class PasswordResetTokenGenerator(object):
     """
@@ -38,7 +39,7 @@ class PasswordResetTokenGenerator(object):
             return False
 
         # Check the timestamp is within limit
-        if (self._num_days(self._today()) - ts) > 3:
+        if (self._num_days(self._today()) - ts) > settings.PASSWORD_RESET_TIMEOUT_DAYS:
             return False
 
         return True
@@ -71,11 +72,10 @@ class PasswordResetTokenGenerator(object):
         return "%s-%s" % (ts_b36, hash)
 
     def _num_days(self, dt):
-        return (dt - date(2001, 1, 1)).days
+        return (dt - date(2001,1,1)).days
 
     def _today(self):
         # Used for mocking in tests
         return date.today()
-
 
 default_token_generator = PasswordResetTokenGenerator()

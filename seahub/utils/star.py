@@ -1,12 +1,14 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # -*- coding: utf-8 -*-
 import logging
+import urllib2
 
 from django.db import IntegrityError
-from django.db.models import Q
+
+from pysearpc import SearpcError
+from seaserv import seafile_api
 
 from seahub.base.models import UserStarredFiles
-from seahub.utils import normalize_file_path, normalize_dir_path
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ def star_file(email, repo_id, path, is_dir, org_id=-1):
                          is_dir=is_dir)
     try:
         f.save()
-    except IntegrityError as e:
+    except IntegrityError, e:
         logger.warn(e)
 
 def unstar_file(email, repo_id, path):
@@ -33,15 +35,14 @@ def unstar_file(email, repo_id, path):
                                              path=path)
     for r in result:
         r.delete()
-
+            
 def is_file_starred(email, repo_id, path, org_id=-1):
     # Should use "get", but here we use "filter" to fix the bug caused by no
     # unique constraint in the table
-
-    path_list = [normalize_file_path(path), normalize_dir_path(path)]
     result = UserStarredFiles.objects.filter(email=email,
-            repo_id=repo_id).filter(Q(path__in=path_list))
-
+                                             repo_id=repo_id,
+                                             path=path,
+                                             org_id=org_id)
     n = len(result)
     if n == 0:
         return False
@@ -60,5 +61,5 @@ def get_dir_starred_files(email, repo_id, parent_dir, org_id=-1):
                                          repo_id=repo_id,
                                          path__startswith=parent_dir,
                                          org_id=org_id)
-    return [ normalize_file_path(f.path) for f in starred_files ]
+    return [ f.path for f in starred_files ]
 

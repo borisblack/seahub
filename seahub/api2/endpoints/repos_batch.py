@@ -1,7 +1,5 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import os
-import posixpath
-import json
 import logging
 
 from pysearpc import SearpcError
@@ -10,7 +8,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 import seaserv
 from seaserv import seafile_api, ccnet_api
@@ -23,21 +21,19 @@ from seahub.api2.views import HTTP_443_ABOVE_QUOTA
 from seahub.group.utils import is_group_member
 from seahub.base.accounts import User
 from seahub.share.utils import is_repo_admin, \
-        check_user_share_out_permission, check_group_share_out_permission, \
-        normalize_custom_permission_name
+        check_user_share_out_permission, check_group_share_out_permission
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.signals import share_repo_to_user_successful, \
         share_repo_to_group_successful
 from seahub.utils import is_org_context, send_perm_audit_msg, \
         normalize_dir_path, get_folder_permission_recursively, \
-        normalize_file_path, check_filename_with_rename, get_file_type_and_ext
-from seahub.utils.repo import get_repo_owner, get_available_repo_perms, \
-        parse_repo_perm, get_locked_files_by_dir, get_sub_folder_permission_by_dir
+        normalize_file_path, check_filename_with_rename
+from seahub.utils.repo import get_repo_owner
 
 from seahub.views import check_folder_permission
 from seahub.settings import MAX_PATH
-from seahub.utils.file_types import SEADOC
-from seahub.seadoc.utils import copy_sdoc_images, move_sdoc_images
+from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, \
+        PERMISSION_ADMIN
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +72,10 @@ class ReposBatchView(APIView):
         if is_org_context(request):
             org_id = request.user.org.org_id
             share_items = seafile_api.list_org_repo_shared_group(org_id,
-                                                                 username,
-                                                                 repo_id)
+                    username, repo_id)
         else:
-            share_items = seafile_api.list_repo_shared_group_by_user(username,
-                                                                     repo_id)
+            share_items = seafile_api.list_repo_shared_group_by_user(
+                    username, repo_id)
 
         ret = []
         for item in share_items:
@@ -152,11 +147,9 @@ class ReposBatchView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             permission = request.data.get('permission', 'rw')
-            if permission not in get_available_repo_perms():
-                permission = normalize_custom_permission_name(permission)
-                if not permission:
-                    error_msg = 'permission invalid.'
-                    return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+            if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN]:
+                error_msg = 'permission invalid.'
+                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             # share repo to user
             if share_type == 'user':
@@ -204,15 +197,10 @@ class ReposBatchView(APIView):
                         if is_org_context(request):
                             org_id = request.user.org.org_id
                             seaserv.seafserv_threaded_rpc.org_add_share(org_id,
-                                                                        repo_id,
-                                                                        username,
-                                                                        to_username,
-                                                                        permission)
+                                    repo_id, username, to_username, permission)
                         else:
-                            seafile_api.share_repo(repo_id,
-                                                   username,
-                                                   to_username,
-                                                   permission)
+                            seafile_api.share_repo(
+                                    repo_id, username, to_username, permission)
 
                         # send a signal when sharing repo successful
                         repo = seafile_api.get_repo(repo_id)
@@ -335,13 +323,10 @@ class ReposBatchView(APIView):
                     try:
                         # get share permission before unshare operation
                         permission = check_user_share_out_permission(repo_id,
-                                                                     '/',
-                                                                     to_username,
-                                                                     is_org_context(request))
+                                '/', to_username, is_org_context(request))
 
                         if is_org_context(request):
-                            # when calling seafile API to share authority related functions,
-                            # change the uesrname to repo owner.
+                            # when calling seafile API to share authority related functions, change the uesrname to repo owner.
                             org_id = request.user.org.org_id
                             seafile_api.org_remove_share(org_id, repo_id, repo_owner, to_username)
                         else:
@@ -349,11 +334,11 @@ class ReposBatchView(APIView):
 
                         # Delete share permission at ExtraSharePermission table.
                         ExtraSharePermission.objects.delete_share_permission(repo_id,
-                                                                             to_username)
+                                to_username)
 
                         # send message
                         send_perm_audit_msg('delete-repo-perm', username,
-                                            to_username, repo_id, '/', permission)
+                                to_username, repo_id, '/', permission)
 
                         result['success'].append({
                             "repo_id": repo_id,
@@ -393,9 +378,7 @@ class ReposBatchView(APIView):
                     try:
                         # get share permission before unshare operation
                         permission = check_group_share_out_permission(repo_id,
-                                                                      '/',
-                                                                      to_group_id,
-                                                                      is_org_context(request))
+                                '/', to_group_id, is_org_context(request))
 
                         org_id = None
                         if is_org_context(request):
@@ -407,11 +390,11 @@ class ReposBatchView(APIView):
 
                         # Delete share permission at ExtraSharePermission table.
                         ExtraGroupsSharePermission.objects.delete_share_permission(repo_id,
-                                                                                   to_group_id)
+                                to_group_id)
 
                         # send message
                         send_perm_audit_msg('delete-repo-perm', username,
-                                            to_group_id, repo_id, '/', permission)
+                                to_group_id, repo_id, '/', permission)
 
                         result['success'].append({
                             "repo_id": repo_id,
@@ -489,9 +472,23 @@ class ReposBatchCopyDirView(APIView):
             error_msg = 'Library %s not found.' % dst_repo_id
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
+        # get total size of file/dir to be copied
+        total_size = 0
+        for path_item in path_list:
+            src_path = path_item['src_path']
+            src_path = normalize_dir_path(src_path)
+
+            current_size = 0
+            current_dir_id = seafile_api.get_dir_id_by_path(src_repo_id,
+                    src_path)
+            current_size = seafile_api.get_dir_size(src_repo.store_id,
+                    src_repo.version, current_dir_id)
+
+            total_size += current_size
+
         # check if above quota for dst repo
-        if seafile_api.check_quota(dst_repo_id, 0) < 0:
-            return api_error(HTTP_443_ABOVE_QUOTA,  _("Out of quota."))
+        if seafile_api.check_quota(dst_repo_id, total_size) < 0:
+            return api_error(HTTP_443_ABOVE_QUOTA,  _(u"Out of quota."))
 
         result = {}
         result['failed'] = []
@@ -582,11 +579,8 @@ class ReposBatchCopyDirView(APIView):
 
             try:
                 # need_progress=0, synchronous=1
-                seafile_api.copy_file(src_repo_id, src_parent_dir,
-                                      json.dumps([src_obj_name]),
-                                      dst_repo_id, dst_parent_dir,
-                                      json.dumps([dst_obj_name]),
-                                      username, 0, 1)
+                seafile_api.copy_file(src_repo_id, src_parent_dir, src_obj_name,
+                        dst_repo_id, dst_parent_dir, dst_obj_name, username, 0, 1)
             except Exception as e:
                 logger.error(e)
                 error_dict = {
@@ -836,11 +830,11 @@ class ReposBatchCopyItemView(APIView):
                 continue
 
             # src resource check
-            # as we don't know if `src_path` stands for a file or a folder,
-            # so we check both
+            ## as we don't know if `src_path` stands for a file or a folder,
+            ## so we check both
             src_dir_id = seafile_api.get_dir_id_by_path(src_repo_id, src_path)
             src_file_id = seafile_api.get_file_id_by_path(src_repo_id,
-                                                          normalize_file_path(src_path))
+                    normalize_file_path(src_path))
 
             if not src_dir_id and not src_file_id:
                 error_dict = {
@@ -860,7 +854,7 @@ class ReposBatchCopyItemView(APIView):
                 continue
 
             # src path permission check, user must has `r/rw` permission for src folder.
-            if parse_repo_perm(check_folder_permission(request, src_repo_id, src_parent_dir)).can_copy is False:
+            if check_folder_permission(request, src_repo_id, src_parent_dir) is None:
                 error_dict = {
                     'error_msg': 'Permission denied.'
                 }
@@ -879,14 +873,10 @@ class ReposBatchCopyItemView(APIView):
 
             try:
                 dst_obj_name = check_filename_with_rename(dst_repo_id,
-                                                          dst_parent_dir,
-                                                          dst_obj_name)
+                        dst_parent_dir, dst_obj_name)
                 # need_progress=0, synchronous=1
-                seafile_api.copy_file(src_repo_id, src_parent_dir,
-                                      json.dumps([src_obj_name]),
-                                      dst_repo_id, dst_parent_dir,
-                                      json.dumps([dst_obj_name]),
-                                      username, 0, 1)
+                seafile_api.copy_file(src_repo_id, src_parent_dir, src_obj_name,
+                        dst_repo_id, dst_parent_dir, dst_obj_name, username, 0, 1)
             except Exception as e:
                 logger.error(e)
                 error_dict = {
@@ -1012,11 +1002,11 @@ class ReposBatchMoveItemView(APIView):
                 continue
 
             # src resource check
-            # as we don't know if `src_path` stands for a file or a folder,
-            # so we check both
+            ## as we don't know if `src_path` stands for a file or a folder,
+            ## so we check both
             src_dir_id = seafile_api.get_dir_id_by_path(src_repo_id, src_path)
             src_file_id = seafile_api.get_file_id_by_path(src_repo_id,
-                                                          normalize_file_path(src_path))
+                    normalize_file_path(src_path))
 
             if not src_dir_id and not src_file_id:
                 error_dict = {
@@ -1055,13 +1045,11 @@ class ReposBatchMoveItemView(APIView):
 
             try:
                 dst_obj_name = check_filename_with_rename(dst_repo_id,
-                                                          dst_parent_dir,
-                                                          dst_obj_name)
-                seafile_api.move_file(src_repo_id, src_parent_dir,
-                                      json.dumps([src_obj_name]),
-                                      dst_repo_id, dst_parent_dir,
-                                      json.dumps([dst_obj_name]),
-                                      False, username, 0, 1)
+                        dst_parent_dir, dst_obj_name)
+                # replace=False, username=username, need_progress=0, synchronous=1
+                seafile_api.move_file(src_repo_id, src_parent_dir, src_obj_name,
+                        dst_repo_id, dst_parent_dir, dst_obj_name,
+                        False, username, 0, 1)
             except Exception as e:
                 logger.error(e)
                 error_dict = {
@@ -1074,670 +1062,4 @@ class ReposBatchMoveItemView(APIView):
             common_dict['dst_obj_name'] = dst_obj_name
             result['success'].append(common_dict)
 
-        return Response(result)
-
-
-class ReposAsyncBatchCopyItemView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def post(self, request):
-        """ Asynchronous multi copy files/folders.
-        Permission checking:
-        1. User must has `r/rw` permission for src folder.
-        2. User must has `rw` permission for dst folder.
-
-        Parameter:
-        {
-            "src_repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-            "src_parent_dir":"/a/b/c/",
-            "src_dirents":["1.md", "2.md"],
-
-            "dst_repo_id":"a3fa768d-0f00-4343-8b8d-07b4077881db",
-            "dst_parent_dir":"/x/y/",
-        }
-        """
-
-        # argument check
-        src_repo_id = request.data.get('src_repo_id', None)
-        if not src_repo_id:
-            error_msg = 'src_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_parent_dir = request.data.get('src_parent_dir', None)
-        if not src_parent_dir:
-            error_msg = 'src_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_dirents = request.data.get('src_dirents', None)
-        if not src_dirents:
-            error_msg = 'src_dirents invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_repo_id = request.data.get('dst_repo_id', None)
-        if not dst_repo_id:
-            error_msg = 'dst_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_parent_dir = request.data.get('dst_parent_dir', None)
-        if not dst_parent_dir:
-            error_msg = 'dst_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        if not seafile_api.get_repo(src_repo_id):
-            error_msg = 'Library %s not found.' % src_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(src_repo_id, src_parent_dir):
-            error_msg = 'Folder %s not found.' % src_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        dst_repo = seafile_api.get_repo(dst_repo_id)
-        if not dst_repo:
-            error_msg = 'Library %s not found.' % dst_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(dst_repo_id, dst_parent_dir):
-            error_msg = 'Folder %s not found.' % dst_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        # 1. User must has `r/rw` or `copy` permission for src parent dir.
-        if parse_repo_perm(check_folder_permission(request, src_repo_id, src_parent_dir)).can_copy is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 2. User must has `rw` permission for dst parent dir.
-        dst_parent_permission = check_folder_permission(request, dst_repo_id, dst_parent_dir)
-        if parse_repo_perm(dst_parent_permission).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 3. if dst repo is encrypted, should decrypt it first
-        username = request.user.username
-        if dst_repo.encrypted and not seafile_api.is_password_set(dst_repo.id, username):
-            result = {'lib_need_decrypt': True}
-            return Response(result, status=status.HTTP_403_FORBIDDEN)
-
-        dirents_map = {}
-        dst_dirents = []
-        for src_dirent in src_dirents:
-            dst_dirent = check_filename_with_rename(dst_repo_id, dst_parent_dir, src_dirent)
-            dst_dirents.append(dst_dirent)
-            dirents_map[src_dirent] = dst_dirent
-
-        result = {}
-        username = request.user.username
-        try:
-            res = seafile_api.copy_file(src_repo_id, src_parent_dir,
-                                        json.dumps(src_dirents),
-                                        dst_repo_id, dst_parent_dir,
-                                        json.dumps(dst_dirents),
-                                        username=username, need_progress=1,
-                                        synchronous=0)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['task_id'] = res.task_id if res.background else ''
-
-        # sdoc image
-        try:
-            sdoc_dirents_map = {}
-            for src_dirent, dst_dirent in dirents_map.items():
-                filetype, fileext = get_file_type_and_ext(src_dirent)
-                if filetype == SEADOC:
-                    sdoc_dirents_map[src_dirent] = dst_dirent
-            for src_dirent, dst_dirent in sdoc_dirents_map.items():
-                src_path = posixpath.join(src_parent_dir, src_dirent)
-                dst_path = posixpath.join(dst_parent_dir, dst_dirent)
-                copy_sdoc_images(
-                    src_repo_id, src_path, dst_repo_id, dst_path, username, is_async=True)
-        except Exception as e:
-            logger.error(e)
-
-        return Response(result)
-
-
-class ReposAsyncBatchMoveItemView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def post(self, request):
-        """ Asynchronous multi move files/folders.
-        Permission checking:
-        1. User must has `rw` permission for src folder.
-        2. User must has `rw` permission for dst folder.
-
-        Parameter:
-        {
-            "src_repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-            "src_parent_dir":"/a/b/c/",
-            "src_dirents":["1.md", "2.md"],
-
-            "dst_repo_id":"a3fa768d-0f00-4343-8b8d-07b4077881db",
-            "dst_parent_dir":"/x/y/",
-        }
-        """
-
-        # argument check
-        src_repo_id = request.data.get('src_repo_id', None)
-        if not src_repo_id:
-            error_msg = 'src_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_parent_dir = request.data.get('src_parent_dir', None)
-        if not src_parent_dir:
-            error_msg = 'src_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_dirents = request.data.get('src_dirents', None)
-        if not src_dirents:
-            error_msg = 'src_dirents invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_repo_id = request.data.get('dst_repo_id', None)
-        if not dst_repo_id:
-            error_msg = 'dst_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_parent_dir = request.data.get('dst_parent_dir', None)
-        if not dst_parent_dir:
-            error_msg = 'dst_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        if not seafile_api.get_repo(src_repo_id):
-            error_msg = 'Library %s not found.' % src_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(src_repo_id, src_parent_dir):
-            error_msg = 'Folder %s not found.' % src_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        dst_repo = seafile_api.get_repo(dst_repo_id)
-        if not dst_repo:
-            error_msg = 'Library %s not found.' % dst_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(dst_repo_id, dst_parent_dir):
-            error_msg = 'Folder %s not found.' % dst_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        # 1. User must has `rw` or `modify` permission for src parent dir.
-        if parse_repo_perm(check_folder_permission(request, src_repo_id, src_parent_dir)).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 2. User must has `rw` or `modify` permission for dst parent dir.
-        if parse_repo_perm(check_folder_permission(request, dst_repo_id, dst_parent_dir)).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 3. if dst repo is encrypted, should decrypt it first
-        username = request.user.username
-        if dst_repo.encrypted and not seafile_api.is_password_set(dst_repo.id, username):
-            result = {'lib_need_decrypt': True}
-            return Response(result, status=status.HTTP_403_FORBIDDEN)
-
-        # check locked files
-        username = request.user.username
-        locked_files = get_locked_files_by_dir(request, src_repo_id, src_parent_dir)
-        for dirent in src_dirents:
-            # file is locked and lock owner is not current user
-            if dirent in list(locked_files.keys()) and \
-                    locked_files[dirent] != username:
-                error_msg = _('File %s is locked.') % dirent
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # check sub folder permission
-        folder_permission_dict = get_sub_folder_permission_by_dir(request,
-                                                                  src_repo_id,
-                                                                  src_parent_dir)
-        for dirent in src_dirents:
-            if dirent in list(folder_permission_dict.keys()) and \
-                    parse_repo_perm(folder_permission_dict[dirent]).can_edit_on_web is False:
-                error_msg = _("Can't move folder %s, please check its permission.") % dirent
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        dirents_map = {}
-        dst_dirents = []
-        for src_dirent in src_dirents:
-            dst_dirent = check_filename_with_rename(dst_repo_id, dst_parent_dir, src_dirent)
-            dst_dirents.append(dst_dirent)
-            dirents_map[src_dirent] = dst_dirent
-
-        # move file
-        result = {}
-        try:
-            res = seafile_api.move_file(src_repo_id, src_parent_dir,
-                                        json.dumps(src_dirents),
-                                        dst_repo_id, dst_parent_dir,
-                                        json.dumps(dst_dirents),
-                                        replace=False, username=username,
-                                        need_progress=1, synchronous=0)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['task_id'] = res.task_id if res.background else ''
-
-        # sdoc image
-        try:
-            sdoc_dirents_map = {}
-            for src_dirent, dst_dirent in dirents_map.items():
-                filetype, fileext = get_file_type_and_ext(src_dirent)
-                if filetype == SEADOC:
-                    sdoc_dirents_map[src_dirent] = dst_dirent
-            for src_dirent, dst_dirent in sdoc_dirents_map.items():
-                src_path = posixpath.join(src_parent_dir, src_dirent)
-                dst_path = posixpath.join(dst_parent_dir, dst_dirent)
-                move_sdoc_images(
-                    src_repo_id, src_path, dst_repo_id, dst_path, username, is_async=True)
-        except Exception as e:
-            logger.error(e)
-
-        return Response(result)
-
-
-class ReposSyncBatchCopyItemView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def post(self, request):
-        """ Synchronous multi copy files/folders.
-        Permission checking:
-        1. User must has `r/rw` permission for src folder.
-        2. User must has `rw` permission for dst folder.
-
-        Parameter:
-        {
-            "src_repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-            "src_parent_dir":"/a/b/c/",
-            "src_dirents":["1.md", "2.md"],
-
-            "dst_repo_id":"a3fa768d-0f00-4343-8b8d-07b4077881db",
-            "dst_parent_dir":"/x/y/",
-        }
-        """
-
-        # argument check
-        src_repo_id = request.data.get('src_repo_id', None)
-        if not src_repo_id:
-            error_msg = 'src_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_parent_dir = request.data.get('src_parent_dir', None)
-        if not src_parent_dir:
-            error_msg = 'src_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_dirents = request.data.get('src_dirents', None)
-        if not src_dirents:
-            error_msg = 'src_dirents invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_repo_id = request.data.get('dst_repo_id', None)
-        if not dst_repo_id:
-            error_msg = 'dst_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_parent_dir = request.data.get('dst_parent_dir', None)
-        if not dst_parent_dir:
-            error_msg = 'dst_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        if not seafile_api.get_repo(src_repo_id):
-            error_msg = 'Library %s not found.' % src_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(src_repo_id, src_parent_dir):
-            error_msg = 'Folder %s not found.' % src_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_repo(dst_repo_id):
-            error_msg = 'Library %s not found.' % dst_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(dst_repo_id, dst_parent_dir):
-            error_msg = 'Folder %s not found.' % dst_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        # 1. User must has `r/rw` or `copy` permission for src parent dir.
-        if parse_repo_perm(check_folder_permission(request, src_repo_id, src_parent_dir)).can_copy is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 2. User must has `rw` permission for dst parent dir.
-        dst_parent_permission = check_folder_permission(request, dst_repo_id, dst_parent_dir)
-        if parse_repo_perm(dst_parent_permission).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        dirents_map = {}
-        dst_dirents = []
-        for src_dirent in src_dirents:
-            dst_dirent = check_filename_with_rename(dst_repo_id, dst_parent_dir, src_dirent)
-            dst_dirents.append(dst_dirent)
-            dirents_map[src_dirent] = dst_dirent
-
-        result = {}
-        username = request.user.username
-        try:
-            seafile_api.copy_file(src_repo_id, src_parent_dir,
-                                  json.dumps(src_dirents),
-                                  dst_repo_id, dst_parent_dir,
-                                  json.dumps(dst_dirents),
-                                  username=username, need_progress=0,
-                                  synchronous=1)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['success'] = True
-
-        # sdoc image
-        try:
-            sdoc_dirents_map = {}
-            for src_dirent, dst_dirent in dirents_map.items():
-                filetype, fileext = get_file_type_and_ext(src_dirent)
-                if filetype == SEADOC:
-                    sdoc_dirents_map[src_dirent] = dst_dirent
-            for src_dirent, dst_dirent in sdoc_dirents_map.items():
-                src_path = posixpath.join(src_parent_dir, src_dirent)
-                dst_path = posixpath.join(dst_parent_dir, dst_dirent)
-                copy_sdoc_images(
-                    src_repo_id, src_path, dst_repo_id, dst_path, username, is_async=False)
-        except Exception as e:
-            logger.error(e)
-
-        return Response(result)
-
-
-class ReposSyncBatchMoveItemView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def post(self, request):
-        """ Synchronous multi move files/folders.
-        Permission checking:
-        1. User must has `rw` permission for src folder.
-        2. User must has `rw` permission for dst folder.
-
-        Parameter:
-        {
-            "src_repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-            "src_parent_dir":"/a/b/c/",
-            "src_dirents":["1.md", "2.md"],
-
-            "dst_repo_id":"a3fa768d-0f00-4343-8b8d-07b4077881db",
-            "dst_parent_dir":"/x/y/",
-        }
-        """
-
-        # argument check
-        src_repo_id = request.data.get('src_repo_id', None)
-        if not src_repo_id:
-            error_msg = 'src_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_parent_dir = request.data.get('src_parent_dir', None)
-        if not src_parent_dir:
-            error_msg = 'src_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        src_dirents = request.data.get('src_dirents', None)
-        if not src_dirents:
-            error_msg = 'src_dirents invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_repo_id = request.data.get('dst_repo_id', None)
-        if not dst_repo_id:
-            error_msg = 'dst_repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dst_parent_dir = request.data.get('dst_parent_dir', None)
-        if not dst_parent_dir:
-            error_msg = 'dst_parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        if not seafile_api.get_repo(src_repo_id):
-            error_msg = 'Library %s not found.' % src_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(src_repo_id, src_parent_dir):
-            error_msg = 'Folder %s not found.' % src_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_repo(dst_repo_id):
-            error_msg = 'Library %s not found.' % dst_repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(dst_repo_id, dst_parent_dir):
-            error_msg = 'Folder %s not found.' % dst_parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        # 1. User must has `rw` or `modify` permission for src parent dir.
-        if parse_repo_perm(check_folder_permission(request, src_repo_id, src_parent_dir)).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # 2. User must has `rw` or `modify` permission for dst parent dir.
-        if parse_repo_perm(check_folder_permission(request, dst_repo_id, dst_parent_dir)).can_edit_on_web is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # check locked files
-        username = request.user.username
-        locked_files = get_locked_files_by_dir(request, src_repo_id, src_parent_dir)
-        for dirent in src_dirents:
-            # file is locked and lock owner is not current user
-            if dirent in list(locked_files.keys()) and \
-                    locked_files[dirent] != username:
-                error_msg = _('File %s is locked.') % dirent
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # check sub folder permission
-        folder_permission_dict = get_sub_folder_permission_by_dir(request,
-                                                                  src_repo_id,
-                                                                  src_parent_dir)
-        for dirent in src_dirents:
-            if dirent in list(folder_permission_dict.keys()) and \
-                    parse_repo_perm(folder_permission_dict[dirent]).can_edit_on_web is False:
-                error_msg = _("Can't move folder %s, please check its permission.") % dirent
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # move file
-        result = {}
-        try:
-            seafile_api.move_file(src_repo_id, src_parent_dir,
-                                  json.dumps(src_dirents),
-                                  dst_repo_id, dst_parent_dir,
-                                  json.dumps(src_dirents),
-                                  replace=False, username=username,
-                                  need_progress=0, synchronous=1)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['success'] = True
-
-        # do not move sdoc image
-
-        return Response(result)
-
-
-class ReposBatchDeleteItemView(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def delete(self, request):
-        """ Multi delete files/folders.
-        Permission checking:
-        1. User must has `rw` permission for parent folder.
-        Parameter:
-        {
-            "repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-            "parent_dir":"/a/b/c/",
-            "dirents":["1.md", "2.md"],
-        }
-        """
-
-        # argument check
-        repo_id = request.data.get('repo_id', None)
-        if not repo_id:
-            error_msg = 'repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        parent_dir = request.data.get('parent_dir', None)
-        if not parent_dir:
-            error_msg = 'parent_dir invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        dirents = request.data.get('dirents', None)
-        if not dirents:
-            error_msg = 'dirents invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if not seafile_api.get_dir_id_by_path(repo_id, parent_dir):
-            error_msg = 'Folder %s not found.' % parent_dir
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        # User must has `rw` permission for parent dir.
-        if parse_repo_perm(check_folder_permission(request, repo_id, parent_dir)).can_delete is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # check locked files
-        username = request.user.username
-        locked_files = get_locked_files_by_dir(request, repo_id, parent_dir)
-        for dirent in dirents:
-            # file is locked and lock owner is not current user
-            if dirent in list(locked_files.keys()) and \
-                    locked_files[dirent] != username:
-                error_msg = _('File %s is locked.') % dirent
-                return api_error(status.HTTP_423_LOCKED, error_msg)
-
-        # check sub folder permission
-        folder_permission_dict = get_sub_folder_permission_by_dir(request, repo_id, parent_dir)
-        for dirent in dirents:
-            if dirent in list(folder_permission_dict.keys()) and \
-                    folder_permission_dict[dirent] not in ('rw', 'cloud-edit'):
-                error_msg = _("Can't delete folder %s, please check its permission.") % dirent
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # delete file
-        result = {}
-        try:
-            seafile_api.del_file(repo_id, parent_dir,
-                                 json.dumps(dirents),
-                                 username)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['success'] = True
-        result['commit_id'] = repo.head_cmmt_id
-        return Response(result)
-
-
-class RepoFoldersItemBatchDelete(APIView):
-
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated, )
-    throttle_classes = (UserRateThrottle, )
-
-    def delete(self, request):
-        """ Multi delete files/folders.
-           Permission checking:
-           1. User must has `rw` permission for parent folder.
-           Parameter:
-           {
-               "repo_id":"7460f7ac-a0ff-4585-8906-bb5a57d2e118",
-               "file_names":['/a/b/c', '/a/b/d''] # json array
-           }
-       """
-        # argument check
-        repo_id = request.data.get('repo_id', None)
-        if not repo_id:
-            error_msg = 'repo_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        file_names = request.data.get('file_names', None)
-        if not file_names:
-            error_msg = 'file_names invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        if parse_repo_perm(check_folder_permission(request, repo_id, '/')).can_delete is False:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        username = request.user.username
-        parent_dir_dirents_map = {}
-        
-        for file_path in file_names:
-            parent_dir = os.path.dirname(file_path)
-            basename = os.path.basename(file_path)
-            if not parent_dir_dirents_map.get(parent_dir, []):
-                parent_dir_dirents_map[parent_dir] = [basename,]
-            else:
-                parent_dir_dirents_map[parent_dir].append(basename)
-                
-        for parent_dir, dirents  in parent_dir_dirents_map.items():
-            locked_files = get_locked_files_by_dir(request, repo_id, parent_dir)
-            for dirent in dirents:
-                # file is locked and lock owner is not current user
-                if dirent in list(locked_files.keys()) and \
-                    locked_files[dirent] != request.user.username:
-                    error_msg = _('File %s is locked.') % dirent
-                    return api_error(status.HTTP_423_LOCKED, error_msg)
-                
-        try:
-            seafile_api.batch_del_files(repo_id, json.dumps(file_names), username)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        result = {}
-        result['success'] = True
-        result['commit_id'] = repo.head_cmmt_id
         return Response(result)

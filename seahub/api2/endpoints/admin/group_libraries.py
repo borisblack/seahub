@@ -10,15 +10,11 @@ import seaserv
 from seaserv import seafile_api, ccnet_api
 
 from seahub.utils import is_org_context
-from seahub.group.utils import group_id_to_name
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
-from seahub.api2.endpoints.group_owned_libraries import get_group_id_by_repo_owner
-from seahub.base.templatetags.seahub_tags import email2nickname
 
 logger = logging.getLogger(__name__)
-
 
 def get_group_repo_info(repo):
     result = {}
@@ -26,14 +22,6 @@ def get_group_repo_info(repo):
     result['name'] = repo.repo_name
     result['size'] = repo.size
     result['shared_by'] = repo.user
-
-    if '@seafile_group' in repo.user:
-        group_id = get_group_id_by_repo_owner(repo.user)
-        group_name = group_id_to_name(group_id)
-        result['shared_by_name'] = group_name
-    else:
-        result['shared_by_name'] = email2nickname(repo.user)
-
     result['permission'] = repo.permission
     result['group_id'] = repo.group_id
     result['encrypted'] = repo.encrypted
@@ -54,9 +42,6 @@ class AdminGroupLibraries(APIView):
         1. only admin can perform this action.
         """
 
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         group_id = int(group_id)
         group = ccnet_api.get_group(group_id)
         if not group:
@@ -67,11 +52,7 @@ class AdminGroupLibraries(APIView):
             org_id = request.user.org.org_id
             repos = seafile_api.get_org_group_repos(org_id, group_id)
         else:
-            org_id = ccnet_api.get_org_id_by_group(group_id)
-            if org_id != -1:
-                repos = seafile_api.get_org_group_repos(org_id, group_id)
-            else:
-                repos = seafile_api.get_repos_by_group(group_id)
+            repos = seafile_api.get_repos_by_group(group_id)
 
         group_repos_info = []
         for repo in repos:
@@ -99,9 +80,6 @@ class AdminGroupLibrary(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         repo = seafile_api.get_repo(repo_id)
         if not repo:

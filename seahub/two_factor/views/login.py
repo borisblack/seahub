@@ -1,31 +1,44 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
+import hashlib
+import re
 import logging
+from datetime import datetime
 from importlib import import_module
-from formtools.wizard.views import SessionWizardView
 
 from constance import config
 
 from django.conf import settings
-from django.urls import reverse
-from django.http import HttpResponseRedirect
+from django.core.urlresolvers import reverse
+from django.http import HttpResponseRedirect, Http404
+from django.utils.translation import ugettext as _
 from django.views.decorators.cache import never_cache
+from django.contrib.sites.shortcuts import get_current_site
 from django.shortcuts import redirect
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import is_safe_url
 from django.views.decorators.debug import sensitive_post_parameters
+
+from formtools.wizard.views import SessionWizardView
+
 
 from seahub.auth import REDIRECT_FIELD_NAME, get_backends
 from seahub.auth import login as auth_login
 from seahub.base.accounts import User
+from seahub.utils.ip import get_remote_ip
+
 from seahub.profile.models import Profile
-from seahub.two_factor.models import StaticDevice, default_device, user_has_device
-from seahub.two_factor.forms import BackupTokenAuthForm, AuthenticationTokenForm
+
+from seahub.two_factor import login as two_factor_login
+from seahub.two_factor.models import (StaticDevice, TOTPDevice, default_device,
+                                      user_has_device)
+
+from seahub.two_factor.forms import TOTPTokenAuthForm, BackupTokenAuthForm, AuthenticationTokenForm
 from seahub.two_factor.views.utils import class_view_decorator
+
 from seahub.utils.auth import get_login_bg_image_path
 
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
-
 
 @class_view_decorator(sensitive_post_parameters())
 @class_view_decorator(never_cache)
@@ -86,29 +99,28 @@ class TwoFactorVerifyView(SessionWizardView):
         """
         Login the user and redirect to the desired page.
         """
-        redirect_to = (
-            self.request.session.get(SESSION_KEY_TWO_FACTOR_REDIRECT_URL, '')
-            or self.request.GET.get(self.redirect_field_name, '')
-        )
+        redirect_to = self.request.session.get(SESSION_KEY_TWO_FACTOR_REDIRECT_URL, '') \
+                      or self.request.GET.get(self.redirect_field_name, '')
 
         auth_login(self.request, self.user)
 
         self.reset_two_factor_session()
 
-        if not url_has_allowed_host_and_scheme(url=redirect_to,
-                                               allowed_hosts=self.request.get_host()):
+        if not is_safe_url(url=redirect_to, host=self.request.get_host()):
             redirect_to = str(settings.LOGIN_REDIRECT_URL)
 
         res = HttpResponseRedirect(redirect_to)
-        if kwargs.get('remember_me', False):
-            s = remember_device(self.user.username)
-            res.set_cookie(
-                'S2FA', s.session_key,
-                max_age=settings.TWO_FACTOR_DEVICE_REMEMBER_DAYS * 24 * 60 * 60,
-                domain=settings.SESSION_COOKIE_DOMAIN,
-                path=settings.SESSION_COOKIE_PATH,
-                secure=settings.SESSION_COOKIE_SECURE or None,
-                httponly=settings.SESSION_COOKIE_HTTPONLY or None)
+        if form_list[0].is_valid():
+            remember_me = form_list[0].cleaned_data['remember_me']
+            if remember_me:
+                s = remember_device(self.user.username)
+                res.set_cookie(
+                    'S2FA', s.session_key,
+                    max_age=settings.TWO_FACTOR_DEVICE_REMEMBER_DAYS * 24 * 60 * 60,
+                    domain=settings.SESSION_COOKIE_DOMAIN,
+                    path=settings.SESSION_COOKIE_PATH,
+                    secure=settings.SESSION_COOKIE_SECURE or None,
+                    httponly=settings.SESSION_COOKIE_HTTPONLY or None)
         return res
 
     def get_form_kwargs(self, step=None):
@@ -167,7 +179,7 @@ class TwoFactorVerifyView(SessionWizardView):
             device = StaticDevice.objects.device_for_user(self.user.username)
             context['backup_tokens'] = device.token_set.count() if device else 0
 
-        context['cancel_url'] = '/accounts/logout/'
+        context['cancel_url'] = settings.LOGOUT_URL
         context['form_prefix'] = '%s-' % self.steps.current
         login_bg_image_path = get_login_bg_image_path()
         context['login_bg_image_path'] = login_bg_image_path
@@ -187,38 +199,32 @@ class TwoFactorVerifyView(SessionWizardView):
             )
             final_form_list.append(form_obj)
 
-        kwargs['remember_me'] = form.cleaned_data.get('remember_me', False)
         done_response = self.done(final_form_list, **kwargs)
         self.storage.reset()
         return done_response
 
-
 def two_factor_auth_enabled(user):
     return config.ENABLE_TWO_FACTOR_AUTH and user_has_device(user)
-
 
 SESSION_KEY_TWO_FACTOR_AUTH_USERNAME = '2fa-username'
 SESSION_KEY_TWO_FACTOR_REDIRECT_URL = '2fa-redirect-url'
 SESSION_KEY_TWO_FACTOR_FAILED_ATTEMPT = '2fa-failed-attempt'
-
-
 def handle_two_factor_auth(request, user, redirect_to):
     request.session[SESSION_KEY_TWO_FACTOR_AUTH_USERNAME] = user.username
     request.session[SESSION_KEY_TWO_FACTOR_REDIRECT_URL] = redirect_to
     request.session[SESSION_KEY_TWO_FACTOR_FAILED_ATTEMPT] = 0
     return redirect(reverse('two_factor_auth'))
 
-
-def verify_two_factor_token(user, token):
+def verify_two_factor_token(username, token):
     """
-    This function is called when doing the api authentication.
-    Backup token is not supported, because if the user has the backup token,
-    he can always login the website and re-setup the totp.
+    This function is called when doing the api authentication. We only support
+    totp here to simply the case. Backup token is not supported, because if the
+    user has the backup token, he can always login the website and re-setup the
+    totp.
     """
-    device = default_device(user)
+    device = TOTPDevice.objects.device_for_user(username)
     if device:
         return device.verify_token(token)
-
 
 def remember_device(s_data):
     SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
@@ -228,13 +234,12 @@ def remember_device(s_data):
     s.create()
     return s
 
-
 def is_device_remembered(request_header, user):
     if not request_header:
         return False
 
     # User must be authenticated, otherwise this function is wrong used.
-    assert user.is_authenticated
+    assert user.is_authenticated()
 
     SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
     s = SessionStore(request_header)

@@ -1,54 +1,59 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # encoding: utf-8
 import os
-import json
 import logging
+import json
+from dateutil.relativedelta import relativedelta
+from constance import config
 
 from django.core.cache import cache
-from django.http import HttpResponse, HttpResponseRedirect, Http404
-from django.utils.translation import gettext as _
+from django.http import HttpResponse, HttpResponseRedirect, Http404, \
+    HttpResponseBadRequest
+from django.utils.translation import ugettext as _, activate
 from django.contrib import messages
-
+from django.utils import timezone
+from django.utils.html import escape
 import seaserv
 from seaserv import seafile_api
+from seaserv import ccnet_threaded_rpc
 from pysearpc import SearpcError
 
-from seahub.share.models import FileShare, UploadLinkShare
+from seahub.share.forms import FileLinkShareForm, \
+    UploadLinkShareForm
+from seahub.share.models import FileShare, UploadLinkShare, OrgFileShare
 from seahub.share.signals import share_repo_to_user_successful
 from seahub.auth.decorators import login_required, login_required_ajax
 from seahub.base.decorators import require_POST
 from seahub.contacts.signals import mail_sended
 from seahub.views import is_registered_user, check_folder_permission
-from seahub.utils import string2list, check_filename_with_rename, \
-    is_valid_username, is_valid_email, is_org_context, \
-    gen_token, normalize_cache_key, gen_shared_link
-from seahub.utils.mail import send_html_email_with_dj_template
-from seahub.utils.ms_excel import write_xls
-from seahub.utils.timeutils import datetime_to_isoformat_timestr
-from seahub.settings import SITE_ROOT, SHARE_LINK_AUDIT_CODE_TIMEOUT
+from seahub.utils import string2list, gen_shared_link, \
+    gen_shared_upload_link, IS_EMAIL_CONFIGURED, check_filename_with_rename, \
+    is_valid_username, is_valid_email, send_html_email, is_org_context, \
+    gen_token, normalize_cache_key, get_site_name
+from seahub.utils.mail import send_html_email_with_dj_template, MAIL_PRIORITY
+from seahub.settings import SITE_ROOT, REPLACE_FROM_EMAIL, \
+        ADD_REPLY_TO_HEADER, SHARE_LINK_EMAIL_LANGUAGE, \
+        SHARE_LINK_AUDIT_CODE_TIMEOUT
+from seahub.profile.models import Profile
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
-
-# rpc wrapper
+########## rpc wrapper
 def is_org_repo_owner(username, repo_id):
     owner = seaserv.seafserv_threaded_rpc.get_org_repo_owner(repo_id)
     return True if owner == username else False
-
 
 def org_share_repo(org_id, repo_id, from_user, to_user, permission):
     return seaserv.seafserv_threaded_rpc.org_add_share(org_id, repo_id,
                                                        from_user, to_user,
                                                        permission)
 
-
 def org_remove_share(org_id, repo_id, from_user, to_user):
     return seaserv.seafserv_threaded_rpc.org_remove_share(org_id, repo_id,
                                                           from_user, to_user)
 
-
-# functions
+########## functions
 def share_to_group(request, repo, group, permission):
     """Share repo to group with given permission.
     """
@@ -74,10 +79,9 @@ def share_to_group(request, repo, group, permission):
             seafile_api.set_group_repo(repo_id, group_id, from_user,
                                        permission)
         return True
-    except Exception as e:
+    except Exception, e:
         logger.error(e)
         return False
-
 
 def share_to_user(request, repo, to_user, permission):
     """Share repo to a user with given permission.
@@ -105,8 +109,8 @@ def share_to_user(request, repo, to_user, permission):
         else:
             seafile_api.share_repo(repo_id, from_user, to_user, permission)
     except SearpcError as e:
-        logger.error(e)
-        return False
+            return False
+            logger.error(e)
     else:
         # send a signal when sharing repo successful
         share_repo_to_user_successful.send(sender=None,
@@ -115,6 +119,93 @@ def share_to_user(request, repo, to_user, permission):
                                            path='/', org_id=org_id)
         return True
 
+########## share link
+@login_required_ajax
+def send_shared_link(request):
+    """
+    Handle ajax post request to send file shared link.
+    """
+    if not request.method == 'POST':
+        raise Http404
+
+    content_type = 'application/json; charset=utf-8'
+
+    if not IS_EMAIL_CONFIGURED:
+        data = json.dumps({'error':_(u'Sending shared link failed. Email service is not properly configured, please contact administrator.')})
+        return HttpResponse(data, status=500, content_type=content_type)
+
+    form = FileLinkShareForm(request.POST)
+    if form.is_valid():
+        email = form.cleaned_data['email']
+        file_shared_link = form.cleaned_data['file_shared_link']
+        file_shared_name = form.cleaned_data['file_shared_name']
+        file_shared_type = form.cleaned_data['file_shared_type']
+        extra_msg = escape(form.cleaned_data['extra_msg'])
+
+        to_email_list = string2list(email)
+        send_success, send_failed = [], []
+        # use contact_email, if present
+        username = Profile.objects.get_contact_email_by_user(request.user.username)
+        for to_email in to_email_list:
+            if not is_valid_email(to_email):
+                send_failed.append(to_email)
+                continue
+
+            if SHARE_LINK_EMAIL_LANGUAGE:
+                activate(SHARE_LINK_EMAIL_LANGUAGE)
+
+            # Add email to contacts.
+            mail_sended.send(sender=None, user=request.user.username,
+                             email=to_email)
+
+            c = {
+                'email': request.user.username,
+                'to_email': to_email,
+                'file_shared_link': file_shared_link,
+                'file_shared_name': file_shared_name,
+            }
+
+            if extra_msg:
+                c['extra_msg'] = extra_msg
+
+            if REPLACE_FROM_EMAIL:
+                from_email = username
+            else:
+                from_email = None  # use default from email
+
+            if ADD_REPLY_TO_HEADER:
+                reply_to = username
+            else:
+                reply_to = None
+
+            try:
+                if file_shared_type == 'f':
+                    c['file_shared_type'] = _(u"file")
+                    send_html_email(_(u'A file is shared to you on %s') % get_site_name(),
+                                    'shared_link_email.html',
+                                    c, from_email, [to_email],
+                                    reply_to=reply_to
+                                    )
+                else:
+                    c['file_shared_type'] = _(u"directory")
+                    send_html_email(_(u'A directory is shared to you on %s') % get_site_name(),
+                                    'shared_link_email.html',
+                                    c, from_email, [to_email],
+                                    reply_to=reply_to)
+
+                send_success.append(to_email)
+            except Exception:
+                send_failed.append(to_email)
+
+        if len(send_success) > 0:
+            data = json.dumps({"send_success": send_success, "send_failed": send_failed})
+            return HttpResponse(data, status=200, content_type=content_type)
+        else:
+            data = json.dumps({"error": _("Internal server error, or please check the email(s) you entered")})
+            return HttpResponse(data, status=400, content_type=content_type)
+    else:
+        return HttpResponseBadRequest(json.dumps(form.errors),
+                                      content_type=content_type)
 
 @login_required
 def save_shared_link(request):
@@ -125,17 +216,17 @@ def save_shared_link(request):
     dst_repo_id = request.POST.get('dst_repo', '')
     dst_path = request.POST.get('dst_path', '')
 
-    next_page = request.headers.get('referer', None)
-    if not next_page:
-        next_page = SITE_ROOT
+    next = request.META.get('HTTP_REFERER', None)
+    if not next:
+        next = SITE_ROOT
 
     if not dst_repo_id or not dst_path:
-        messages.error(request, _('Please choose a folder.'))
-        return HttpResponseRedirect(next_page)
+        messages.error(request, _(u'Please choose a directory.'))
+        return HttpResponseRedirect(next)
 
     if check_folder_permission(request, dst_repo_id, dst_path) != 'rw':
         messages.error(request, _('Permission denied'))
-        return HttpResponseRedirect(next_page)
+        return HttpResponseRedirect(next)
 
     try:
         fs = FileShare.objects.get(token=token)
@@ -148,96 +239,83 @@ def save_shared_link(request):
 
     new_obj_name = check_filename_with_rename(dst_repo_id, dst_path, obj_name)
 
-    seafile_api.copy_file(src_repo_id, src_path,
-                          json.dumps([obj_name]),
-                          dst_repo_id, dst_path,
-                          json.dumps([new_obj_name]),
-                          username, need_progress=0)
+    seafile_api.copy_file(src_repo_id, src_path, obj_name,
+                          dst_repo_id, dst_path, new_obj_name, username,
+                          need_progress=0)
 
-    messages.success(request, _('Successfully saved.'))
-    return HttpResponseRedirect(next_page)
+    messages.success(request, _(u'Successfully saved.'))
+    return HttpResponseRedirect(next)
 
-
-# share link
-@login_required
-def export_shared_link(request):
+@login_required_ajax
+def send_shared_upload_link(request):
     """
-    Export shared links to excel.
+    Handle ajax post request to send shared upload link.
     """
+    if not request.method == 'POST':
+        raise Http404
 
-    def get_share_link_info(fileshare):
+    content_type = 'application/json; charset=utf-8'
 
-        if fileshare.expire_date:
-            expire_date = datetime_to_isoformat_timestr(fileshare.expire_date)
+    if not IS_EMAIL_CONFIGURED:
+        data = json.dumps({'error':_(u'Sending shared upload link failed. Email service is not properly configured, please contact administrator.')})
+        return HttpResponse(data, status=500, content_type=content_type)
+
+    form = UploadLinkShareForm(request.POST)
+    if form.is_valid():
+        email = form.cleaned_data['email']
+        shared_upload_link = form.cleaned_data['shared_upload_link']
+        extra_msg = escape(form.cleaned_data['extra_msg'])
+
+        to_email_list = string2list(email)
+        send_success, send_failed = [], []
+        # use contact_email, if present
+        username = Profile.objects.get_contact_email_by_user(request.user.username)
+        for to_email in to_email_list:
+            if not is_valid_email(to_email):
+                send_failed.append(to_email)
+                continue
+            # Add email to contacts.
+            mail_sended.send(sender=None, user=request.user.username,
+                             email=to_email)
+
+            c = {
+                'email': request.user.username,
+                'to_email': to_email,
+                'shared_upload_link': shared_upload_link,
+                }
+
+            if extra_msg:
+                c['extra_msg'] = extra_msg
+
+            if REPLACE_FROM_EMAIL:
+                from_email = username
+            else:
+                from_email = None  # use default from email
+
+            if ADD_REPLY_TO_HEADER:
+                reply_to = username
+            else:
+                reply_to = None
+
+            try:
+                send_html_email(_(u'An upload link is shared to you on %s') % get_site_name(),
+                                'shared_upload_link_email.html',
+                                c, from_email, [to_email],
+                                reply_to=reply_to)
+
+                send_success.append(to_email)
+            except Exception:
+                send_failed.append(to_email)
+
+        if len(send_success) > 0:
+            data = json.dumps({"send_success": send_success, "send_failed": send_failed})
+            return HttpResponse(data, status=200, content_type=content_type)
         else:
-            expire_date = ''
-
-        info = {}
-        info['username'] = fileshare.username
-        info['link'] = gen_shared_link(fileshare.token, fileshare.s_type)
-        info['expire_date'] = expire_date
-        info['password'] = fileshare.get_password()
-
-        can_edit = fileshare.get_permissions().get('can_edit')
-        can_download = fileshare.get_permissions().get('can_download')
-        can_upload = fileshare.get_permissions().get('can_upload')
-        permission_str = f"{can_edit} {can_download} {can_upload}".lower()
-
-        permission_dict = {
-            "false true false": _('Preview and download'),
-            "false false false": _('Preview only'),
-            "false true true": _('Download and upload'),
-            "true true false": _('Edit on cloud and download'),
-            "true false false": _('Edit on cloud only')
-        }
-
-        info['permission'] = permission_dict.get(permission_str, '')
-
-        return info
-
-    token_list = request.GET.getlist('token')
-    if not token_list:
-        data = json.dumps({'error': _('Argument missing')})
-        return HttpResponse(data,
-                            status=400,
-                            content_type='application/json; charset=utf-8')
-
-    data_list = []
-    username = request.user.username
-    share_links = FileShare.objects.filter(token__in=token_list)
-
-    for link in share_links:
-
-        if link.username != username:
-            continue
-
-        link_info = get_share_link_info(link)
-        row = [link_info.get('link'), link_info.get('username'),
-               link_info.get('password') or '--',
-               link_info.get('permission'),
-               link_info.get('expire_date')]
-
-        data_list.append(row)
-
-    excel_name = 'Share Links'
-    head = [_("Share Link"), _("Creator"),
-            _('Password'), _("Permission"), _("Expiration")]
-
-    try:
-        wb = write_xls(excel_name, head, data_list)
-    except Exception as e:
-        logger.error(e)
-        data = json.dumps({'error': _('Internal Server Error')})
-        return HttpResponse(data,
-                            status=500,
-                            content_type='application/json; charset=utf-8')
-
-    response = HttpResponse(content_type='application/ms-excel')
-    response['Content-Disposition'] = 'attachment; filename="%s.xlsx"' % excel_name
-    wb.save(response)
-
-    return response
-
+            data = json.dumps({"error": _("Internal server error, or please check the email(s) you entered")})
+            return HttpResponse(data, status=400, content_type=content_type)
+    else:
+        return HttpResponseBadRequest(json.dumps(form.errors),
+                                      content_type=content_type)
 
 @login_required_ajax
 @require_POST
@@ -251,11 +329,11 @@ def ajax_private_share_dir(request):
 
     repo = seafile_api.get_repo(repo_id)
     if not repo:
-        result['error'] = _('Library does not exist.')
+        result['error'] = _(u'Library does not exist.')
         return HttpResponse(json.dumps(result), status=400, content_type=content_type)
 
     if seafile_api.get_dir_id_by_path(repo_id, path) is None:
-        result['error'] = _('Folder does not exist.')
+        result['error'] = _(u'Directory does not exist.')
         return HttpResponse(json.dumps(result), status=400, content_type=content_type)
 
     if path != '/':
@@ -281,7 +359,8 @@ def ajax_private_share_dir(request):
                     sub_repo_id = seaserv.seafserv_threaded_rpc.create_org_virtual_repo(
                         org_id, repo_id, path, name, name, username)
                 else:
-                    sub_repo_id = seafile_api.create_virtual_repo(repo_id, path, name, name, username)
+                    sub_repo_id = seafile_api.create_virtual_repo(repo_id, path,
+                        name, name, username)
                 sub_repo = seafile_api.get_repo(sub_repo_id)
             except SearpcError as e:
                 result['error'] = e.msg
@@ -303,7 +382,7 @@ def ajax_private_share_dir(request):
     # Test whether user is the repo owner.
     if not seafile_api.is_repo_owner(username, shared_repo_id) and \
             not is_org_repo_owner(username, shared_repo_id):
-        result['error'] = _('Only the owner of the library has permission to share it.')
+        result['error'] = _(u'Only the owner of the library has permission to share it.')
         return HttpResponse(json.dumps(result), status=500, content_type=content_type)
 
     # Parsing input values.
@@ -344,7 +423,14 @@ def ajax_private_share_dir(request):
         data = json.dumps({"error": _("Please check the email(s) you entered")})
         return HttpResponse(data, status=400, content_type=content_type)
 
-def ajax_get_link_email_audit_code(request):
+def ajax_get_link_audit_code(request):
+    """
+    Generate a token, and record that token with email in cache, expires in
+    one hour, send token to that email address.
+
+    User provide token and email at share link page, if the token and email
+    are valid, record that email in session.
+    """
     content_type = 'application/json; charset=utf-8'
 
     token = request.POST.get('token')
@@ -354,37 +440,34 @@ def ajax_get_link_email_audit_code(request):
             'error': _('Email address is not valid')
         }), status=400, content_type=content_type)
 
-    fs = FileShare.objects.get_valid_file_link_by_token(token)
+    dfs = FileShare.objects.get_valid_file_link_by_token(token)
+    ufs = UploadLinkShare.objects.get_valid_upload_link_by_token(token)
+
+    fs = dfs if dfs else ufs
     if fs is None:
         return HttpResponse(json.dumps({
             'error': _('Share link is not found')
         }), status=400, content_type=content_type)
 
-    authed_details = json.loads(fs.authed_details)
-    authed_emails = authed_details.get('authed_emails', [])
-    if email not in authed_emails:
-        return HttpResponse(json.dumps({
-            'error': _('Email address is not valid')
-        }), status=400, content_type=content_type)
-
+    cache_key = normalize_cache_key(email, 'share_link_audit_')
     code = gen_token(max_length=6)
-    cache_key = normalize_cache_key(email, 'share_link_email_auth_', token=fs.token)
-    cache.set(cache_key, code, 60 * 60)
+    cache.set(cache_key, code, SHARE_LINK_AUDIT_CODE_TIMEOUT)
 
     # send code to user via email
-    subject = _("Verification code")
-    c = {'code': code}
-
-    send_success = send_html_email_with_dj_template(email,
-                                                    subject=subject,
-                                                    dj_template='share/audit_code_email.html',
-                                                    context=c)
-
-    if not send_success:
+    subject = _("Verification code for visiting share links")
+    c = {
+        'code': code,
+    }
+    try:
+        send_html_email_with_dj_template(
+            email, dj_template='share/audit_code_email.html',
+            context=c, subject=subject, priority=MAIL_PRIORITY.now
+        )
+        return HttpResponse(json.dumps({'success': True}), status=200,
+                            content_type=content_type)
+    except Exception as e:
         logger.error('Failed to send audit code via email to %s')
+        logger.error(e)
         return HttpResponse(json.dumps({
             "error": _("Failed to send a verification code, please try again later.")
         }), status=500, content_type=content_type)
-
-    return HttpResponse(json.dumps({'success': True}), status=200,
-                        content_type=content_type)

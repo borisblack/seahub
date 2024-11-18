@@ -6,11 +6,11 @@ from base64 import b32encode
 from constance import config
 from django.conf import settings
 from django.contrib.sites.shortcuts import get_current_site
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.forms import Form
 from django.http import HttpResponse, Http404, HttpResponseRedirect
 from django.shortcuts import redirect
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import is_safe_url
 from django.utils.module_loading import import_string
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
@@ -19,6 +19,12 @@ from django.views.generic.base import View
 
 import qrcode
 import qrcode.image.svg
+
+try:
+    from formtools.wizard.views import SessionWizardView
+except ImportError:
+    # pylint: disable=import-error,no-name-in-module
+    from django.contrib.formtools.wizard.views import SessionWizardView
 
 from seahub.auth import login as login, REDIRECT_FIELD_NAME
 from seahub.auth.decorators import login_required
@@ -35,8 +41,6 @@ from seahub.two_factor.forms import (MethodForm, TOTPDeviceForm,
 from seahub.two_factor.views.utils import (class_view_decorator,
                                                  CheckTwoFactorEnabledMixin,
                                                  IdempotentSessionWizardView)
-from seahub.base.templatetags.seahub_tags import email2nickname
-
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +105,7 @@ class SetupView(CheckTwoFactorEnabledMixin, IdempotentSessionWizardView):
         """
         In the validation step, ask the device to generate a challenge.
         """
-        next_step = self.steps.__next__
+        next_step = self.steps.next
         if next_step == 'validation':
             try:
                 self.get_device().generate_challenge()
@@ -279,10 +283,10 @@ class QRGeneratorView(View):
                                        self.default_qr_factory)
         image_factory = import_string(image_factory_string)
         content_type = self.image_content_types[image_factory.kind]
-        nickname = email2nickname(self.request.user.username)
+
         otpauth_url = get_otpauth_url(
-            accountname=nickname,
-            issuer=config.SITE_NAME,
+            accountname=self.request.user.username,
+            issuer=get_current_site(self.request).name,
             secret=key,
             digits=totp_digits())
 

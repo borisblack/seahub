@@ -13,7 +13,6 @@ from seaserv import seafile_api
 
 logger = logging.getLogger(__name__)
 
-
 class QueryZipProgressView(APIView):
 
     throttle_classes = (UserRateThrottle, )
@@ -35,9 +34,5 @@ class QueryZipProgressView(APIView):
             logger.error(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        if not progress:
-            error_msg = 'progress not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         return Response(json.loads(progress))

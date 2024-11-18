@@ -2,12 +2,11 @@
 """
 Provides various throttling policies.
 """
-
+from __future__ import unicode_literals
 from django.conf import settings
 from django.core.cache import cache as default_cache
 from django.core.exceptions import ImproperlyConfigured
 from rest_framework.settings import api_settings
-from rest_framework.throttling import BaseThrottle
 import time
 
 from seahub.utils.ip import get_remote_ip
@@ -29,7 +28,7 @@ class BaseThrottle(object):
         if present and number of proxies is > 0. If not use all of
         HTTP_X_FORWARDED_FOR if it is available, if not use REMOTE_ADDR.
         """
-        xff = request.headers.get('x-forwarded-for')
+        xff = request.META.get('HTTP_X_FORWARDED_FOR')
         remote_addr = request.META.get('REMOTE_ADDR')
         num_proxies = api_settings.NUM_PROXIES
 
@@ -178,7 +177,7 @@ class AnonRateThrottle(SimpleRateThrottle):
     scope = 'anon'
 
     def get_cache_key(self, request, view):
-        if request.user.is_authenticated:
+        if request.user.is_authenticated():
             return None  # Only throttle unauthenticated requests.
 
         return self.cache_format % {
@@ -198,7 +197,7 @@ class UserRateThrottle(SimpleRateThrottle):
     scope = 'user'
 
     def get_cache_key(self, request, view):
-        if request.user.is_authenticated:
+        if request.user.is_authenticated():
             ident = request.user.id
         else:
             ident = self.get_ident(request)
@@ -207,22 +206,6 @@ class UserRateThrottle(SimpleRateThrottle):
             'scope': self.scope,
             'ident': ident
         }
-
-class ShareLinkZipTaskThrottle(SimpleRateThrottle):
-
-    scope = 'share_link_zip_task'
-
-    def get_cache_key(self, request, view):
-        if request.user.is_authenticated:
-            ident = request.user.id
-        else:
-            ident = self.get_ident(request)
-        
-        return self.cache_format % {
-            'scope': self.scope,
-            'ident': ident
-        }
-
 
 
 class ScopedRateThrottle(SimpleRateThrottle):
@@ -262,7 +245,7 @@ class ScopedRateThrottle(SimpleRateThrottle):
         Otherwise generate the unique cache key by concatenating the user id
         with the '.throttle_scope` property of the view.
         """
-        if request.user.is_authenticated:
+        if request.user.is_authenticated():
             ident = request.user.id
         else:
             ident = self.get_ident(request)

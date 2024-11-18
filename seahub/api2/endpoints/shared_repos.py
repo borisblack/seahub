@@ -15,16 +15,13 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.profile.models import Profile
 from seahub.utils import is_org_context, is_valid_username, send_perm_audit_msg
-from seahub.utils.repo import get_available_repo_perms
 from seahub.base.templatetags.seahub_tags import email2nickname, email2contact_email
-from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission, \
-        CustomSharePermissions
+from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
+from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN
 from seahub.share.utils import update_user_dir_permission, update_group_dir_permission,\
-        check_user_share_out_permission, check_group_share_out_permission, \
-        normalize_custom_permission_name
+        check_user_share_out_permission, check_group_share_out_permission
 
 logger = logging.getLogger(__name__)
-
 
 class SharedRepos(APIView):
 
@@ -38,6 +35,7 @@ class SharedRepos(APIView):
         Permission checking:
         1. all authenticated user can perform this action.
         """
+
         shared_repos = []
         username = request.user.username
         try:
@@ -56,37 +54,19 @@ class SharedRepos(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        repo_id_list = []
-        for repo in shared_repos:
-
-            if repo.is_virtual:
-                continue
-
-            repo_id = repo.repo_id
-            repo_id_list.append(repo_id)
-
-        custom_permission_dict = {}
-        custom_permissions = CustomSharePermissions.objects.filter(repo_id__in=repo_id_list)
-        for custom_permission in custom_permissions:
-            custom_id = f'custom-{custom_permission.id}'
-            custom_permission_dict[custom_id] = custom_permission.name
-
         returned_result = []
-        shared_repos.sort(key=lambda x: x.repo_name)
+        shared_repos.sort(lambda x, y: cmp(x.repo_name, y.repo_name))
         usernames = []
         gids = []
-
         for repo in shared_repos:
             if repo.is_virtual:
-                continue
+                    continue
 
             result = {}
             result['repo_id'] = repo.repo_id
             result['repo_name'] = repo.repo_name
-            result['encrypted'] = repo.encrypted
             result['share_type'] = repo.share_type
             result['share_permission'] = repo.permission
-            result['share_permission_name'] = custom_permission_dict.get(repo.permission, '')
             result['modifier_email'] = repo.last_modifier
             result['modifier_name'] = email2nickname(repo.last_modifier)
             result['modifier_contact_email'] = email2contact_email(repo.last_modifier)
@@ -127,17 +107,12 @@ class SharedRepo(APIView):
         Permission checking:
         1. Only repo owner can update.
         """
-        
-        if not request.user.permissions.can_share_repo():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         permission = request.data.get('permission', None)
-        if permission not in get_available_repo_perms():
-            permission = normalize_custom_permission_name(permission)
-            if not permission:
-                error_msg = 'permission invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
+        if permission not in [PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN]:
+            error_msg = 'permission invalid.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         share_type = request.data.get('share_type', None)
         if not share_type:
@@ -184,7 +159,7 @@ class SharedRepo(APIView):
                 return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
             send_perm_audit_msg('modify-repo-perm', username,
-                                shared_to, repo_id, '/', permission)
+                shared_to, repo_id, '/', permission)
 
         if share_type == 'group':
             group_id = request.data.get('group_id', None)
@@ -215,7 +190,7 @@ class SharedRepo(APIView):
                 return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
             send_perm_audit_msg('modify-repo-perm', username,
-                                group_id, repo_id, '/', permission)
+                    group_id, repo_id, '/', permission)
 
         if share_type == 'public':
 
@@ -236,7 +211,7 @@ class SharedRepo(APIView):
                 return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
             send_perm_audit_msg('modify-repo-perm', username,
-                                'all', repo_id, '/', permission)
+                    'all', repo_id, '/', permission)
 
         return Response({'success': True})
 
@@ -244,11 +219,9 @@ class SharedRepo(APIView):
         """ Unshare a repo.
 
         Permission checking:
-        1. Only repo owner and system admin can unshare a publib library.
+        1. Only repo owner can unshare a library.
         """
-        if not request.user.permissions.can_share_repo():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-        
+
         # argument check
         share_type = request.GET.get('share_type', None)
         if not share_type:
@@ -271,7 +244,7 @@ class SharedRepo(APIView):
         else:
             repo_owner = seafile_api.get_repo_owner(repo_id)
 
-        if not request.user.is_staff and not username == repo_owner:
+        if username != repo_owner:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -302,7 +275,7 @@ class SharedRepo(APIView):
                 return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
             send_perm_audit_msg('delete-repo-perm', username, user,
-                                repo_id, '/', permission)
+                    repo_id, '/', permission)
 
         if share_type == 'group':
             group_id = request.GET.get('group_id', None)
@@ -317,6 +290,7 @@ class SharedRepo(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             permission = check_group_share_out_permission(repo_id, '/', group_id, is_org)
+
 
             try:
                 if is_org:
@@ -334,10 +308,10 @@ class SharedRepo(APIView):
         if share_type == 'public':
             pub_repos = []
             if org_id:
-                pub_repos = seafile_api.list_org_inner_pub_repos(org_id)
+                pub_repos = seaserv.list_org_inner_pub_repos(org_id, username)
 
             if not request.cloud_mode:
-                pub_repos = seafile_api.get_inner_pub_repo_list()
+                pub_repos = seaserv.list_inner_pub_repos(username)
 
             try:
                 if org_id:

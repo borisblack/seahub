@@ -1,13 +1,18 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
+from __future__ import absolute_import, division, print_function, unicode_literals
 
+from binascii import unhexlify
 import logging
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
-from django.utils.translation import gettext_lazy as _
+from django.utils import six
+from django.utils.translation import ugettext_lazy as _
 
 from seahub.base.fields import LowerCaseCharField
-from seahub.two_factor.utils import hex_validator
+from seahub.two_factor.oath import totp
+from seahub.two_factor.utils import hex_validator, random_hex
 
 logger = logging.getLogger(__name__)
 

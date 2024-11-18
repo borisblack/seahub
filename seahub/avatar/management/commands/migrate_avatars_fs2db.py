@@ -3,10 +3,11 @@ import base64
 from datetime import datetime
 import hashlib
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import NoArgsCommand
 from django.db import connection, transaction
 
 from seahub.avatar.models import Avatar
+from seahub.avatar.settings import AUTO_GENERATE_AVATAR_SIZES
 from seahub.utils.timeutils import value_to_db_datetime
 
 
@@ -14,7 +15,7 @@ class AvatarNotFoundError(Exception):
     pass
 
 
-class Command(BaseCommand):
+class Command(NoArgsCommand):
     help = "Migrate avatars from file system to database."
 
     def __init__(self):
@@ -27,13 +28,13 @@ class Command(BaseCommand):
 
         super(Command, self).__init__()
 
-    def handle(self, **options):
+    def handle_noargs(self, **options):
         for avatar in Avatar.objects.all():
             try:
                 self._save(avatar.avatar.name, avatar.avatar)
-                print("SUCCESS: migrated Avatar path=%s user=%s" % (avatar.avatar.name, avatar.emailuser))
+                print "SUCCESS: migrated Avatar path=%s user=%s" % (avatar.avatar.name, avatar.emailuser)
             except AvatarNotFoundError:
-                print("ERROR: Avatar file not found: path=%s user=%s. Skip." % (avatar.avatar.name, avatar.emailuser))
+                print "ERROR: Avatar file not found: path=%s user=%s. Skip." % (avatar.avatar.name, avatar.emailuser)
                 continue
 
             # try:
@@ -49,10 +50,10 @@ class Command(BaseCommand):
         in the name will be converted to forward '/'.
         """
         name = name.replace('\\', '/')
-        name_md5 = hashlib.md5(name.encode('utf-8')).hexdigest()
+        name_md5 = hashlib.md5(name).hexdigest()
         try:
             binary = content.read()
-        except AttributeError as IOError:
+        except AttributeError, IOError:
             raise AvatarNotFoundError
 
         size = len(binary)
@@ -77,7 +78,7 @@ class Command(BaseCommand):
         return name
 
     def exists(self, name):
-        name_md5 = hashlib.md5(name.encode('utf-8')).hexdigest()
+        name_md5 = hashlib.md5(name).hexdigest()
         query = 'SELECT COUNT(*) FROM %(table)s WHERE %(name_md5_column)s = %%s'
         query %= self.__dict__
         cursor = connection.cursor()

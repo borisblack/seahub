@@ -10,10 +10,8 @@ from rest_framework import status
 from seaserv import seafile_api, ccnet_api
 
 from seahub.group.utils import get_group_member_info, is_group_member
-from seahub.group.signals import add_user_to_group
 from seahub.avatar.settings import AVATAR_DEFAULT_SIZE
 from seahub.base.accounts import User
-from seahub.base.templatetags.seahub_tags import email2nickname
 
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
@@ -35,9 +33,6 @@ class AdminGroupMembers(APIView):
         1. only admin can perform this action.
         """
 
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         group_id = int(group_id)
         group = ccnet_api.get_group(group_id)
         if not group:
@@ -45,42 +40,29 @@ class AdminGroupMembers(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         try:
-            page = int(request.GET.get('page', '1'))
-            per_page = int(request.GET.get('per_page', '100'))
+            avatar_size = int(request.GET.get('avatar_size',
+                AVATAR_DEFAULT_SIZE))
         except ValueError:
-            page = 1
-            per_page = 100
-
-        start = (page - 1) * per_page
-        limit = per_page + 1
+            avatar_size = AVATAR_DEFAULT_SIZE
 
         try:
-            members = ccnet_api.get_group_members(group_id, start, limit)
+            members = ccnet_api.get_group_members(group_id)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        if len(members) > per_page:
-            members = members[:per_page]
-            has_next_page = True
-        else:
-            has_next_page = False
-
         group_members_info = []
         for m in members:
-            member_info = get_group_member_info(request, group_id, m.user_name)
+            member_info = get_group_member_info(request, group_id, m.user_name, avatar_size)
             group_members_info.append(member_info)
 
         group_members = {
             'group_id': group_id,
             'group_name': group.group_name,
-            'members': group_members_info,
-            'page_info': {
-                'has_next_page': has_next_page,
-                'current_page': page
-            }
+            'members': group_members_info
         }
+
         return Response(group_members)
 
     def post(self, request, group_id):
@@ -90,9 +72,6 @@ class AdminGroupMembers(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         group_id = int(group_id)
@@ -124,7 +103,7 @@ class AdminGroupMembers(APIView):
             if is_group_member(group_id, email, in_structure=False):
                 result['failed'].append({
                     'email': email,
-                    'error_msg': 'User %s is already a group member.' % email2nickname(email)
+                    'error_msg': 'User %s is already a group member.' % email
                     })
                 continue
 
@@ -143,11 +122,6 @@ class AdminGroupMembers(APIView):
                     'error_msg': 'Internal Server Error'
                     })
 
-            add_user_to_group.send(sender=None,
-                                   group_staff=request.user.username,
-                                   group_id=group_id,
-                                   added_user=email)
-
         return Response(result)
 
 
@@ -163,9 +137,6 @@ class AdminGroupMember(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         group_id = int(group_id)
@@ -213,9 +184,6 @@ class AdminGroupMember(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_group():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # argument check
         group_id = int(group_id)

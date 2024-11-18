@@ -1,6 +1,5 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import logging
-from datetime import datetime
 
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -23,12 +22,12 @@ from seahub.base.templatetags.seahub_tags import email2nickname, \
 
 logger = logging.getLogger(__name__)
 
-def get_new_file_history_info(ent):
+def get_new_file_history_info(ent, avatar_size):
 
     info = {}
 
     creator_name = ent.op_user
-    url, is_default, date_uploaded = api_avatar_url(creator_name)
+    url, is_default, date_uploaded = api_avatar_url(creator_name, avatar_size)
 
     info['creator_avatar_url'] = url
     info['creator_email'] = creator_name
@@ -44,14 +43,12 @@ def get_new_file_history_info(ent):
 
     return info
 
-def get_file_history_info(commit):
+def get_file_history_info(commit, avatar_size):
 
     info = {}
 
-    creator_name = getattr(commit, 'creator_name', '')
-    if creator_name is None:
-        creator_name = ''
-    url, is_default, date_uploaded = api_avatar_url(creator_name)
+    creator_name = commit.creator_name
+    url, is_default, date_uploaded = api_avatar_url(creator_name, avatar_size)
 
     info['creator_avatar_url'] = url
     info['creator_email'] = creator_name
@@ -92,6 +89,11 @@ class FileHistoryView(APIView):
         if not commit_id:
             commit_id = repo.head_cmmt_id
 
+        try:
+            avatar_size = int(request.GET.get('avatar_size', 32))
+        except ValueError:
+            avatar_size = 32
+
         # Don't use seafile_api.get_file_id_by_path()
         # if path parameter is `rev_renamed_old_path`.
         # seafile_api.get_file_id_by_path() will return None.
@@ -105,14 +107,6 @@ class FileHistoryView(APIView):
         if not check_folder_permission(request, repo_id, '/'):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
-        # get repo history limit
-        try:
-            keep_days = seafile_api.get_repo_history_limit(repo_id)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
         # get file history
         limit = request.GET.get('limit', 50)
@@ -130,13 +124,8 @@ class FileHistoryView(APIView):
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
         result = []
-        present_time = datetime.utcnow()
         for commit in file_revisions:
-            history_time = datetime.utcfromtimestamp(commit.ctime)
-            if (keep_days != -1) and ((present_time - history_time).days > keep_days):
-                next_start_commit = False
-                break
-            info = get_file_history_info(commit)
+            info = get_file_history_info(commit, avatar_size)
             info['path'] = path
             result.append(info)
 
@@ -171,9 +160,11 @@ class NewFileHistoryView(APIView):
         commit_id = repo.head_cmmt_id
 
         try:
+            avatar_size = int(request.GET.get('avatar_size', 32))
             page = int(request.GET.get('page', '1'))
             per_page = int(request.GET.get('per_page', '25'))
         except ValueError:
+            avatar_size = 32
             page = 1
             per_page = 25
 
@@ -191,25 +182,17 @@ class NewFileHistoryView(APIView):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
-        # get repo history limit
-        try:
-            history_limit = seafile_api.get_repo_history_limit(repo_id)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
         start = (page - 1) * per_page
         count = per_page
 
         try:
-            file_revisions, total_count = get_file_history(repo_id, path, start, count, history_limit)
+            file_revisions, total_count = get_file_history(repo_id, path, start, count)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        data = [get_new_file_history_info(ent) for ent in file_revisions]
+        data = [get_new_file_history_info(ent, avatar_size) for ent in file_revisions]
         result = {
             "data": data,
             "page": page,

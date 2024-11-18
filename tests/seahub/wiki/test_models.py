@@ -10,7 +10,7 @@ class WikiTest(BaseTestCase):
         wiki = Wiki.objects.add('new wiki', self.user.username)
 
         d = wiki.to_dict()
-        assert 'published/new-wiki/' in d['link']
+        assert 'wikis/new-wiki/' in d['link']
         assert 'new-wiki' == d['slug']
         assert 'T' in d['created_at']
         assert 'T' in d['updated_at']
@@ -22,3 +22,4 @@ class WikiManagerTest(BaseTestCase):
         wiki = Wiki.objects.add('new wiki', self.user.username)
 
         assert wiki is not None
+        assert wiki.created_at.replace(microsecond=0) <= dt(wiki.updated_at)

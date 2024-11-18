@@ -19,9 +19,9 @@ def load_backend(path):
     module, attr = path[:i], path[i+1:]
     try:
         mod = import_module(module)
-    except ImportError as e:
+    except ImportError, e:
         raise ImproperlyConfigured('Error importing authentication backend %s: "%s"' % (module, e))
-    except ValueError as e:
+    except ValueError, e:
         raise ImproperlyConfigured('Error importing authentication backends. Is AUTHENTICATION_BACKENDS a correctly defined list or tuple?')
     try:
         cls = getattr(mod, attr)
@@ -72,15 +72,6 @@ def login(request, user):
         user = request.user
     # TODO: It would be nice to support different login methods, like signed cookies.
     user.last_login = datetime.datetime.now()
-
-    # After each ADFS/SAML single sign-on is completed, `_saml2_subject_id` will be recorded in the session,
-    # so that to distinguish ADFS/SAML users and local users when logging out.
-    # Therefore, every time login, try to delete `_saml2_subject_id` from the session
-    # to ensure that `_saml2_subject_id` is brand new and will not interfere with other users' logout.
-    try:
-        del request.saml_session['_saml2_subject_id']
-    except:
-        pass
 
     if SESSION_KEY in request.session:
         if request.session[SESSION_KEY] != user.username:

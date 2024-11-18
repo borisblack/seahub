@@ -1,11 +1,11 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-from django.urls import path
+from django.conf.urls import url
 
-from .views import slug
-from ..views import react_fake_view
+from .views import slug, wiki_list, edit_page
 
 urlpatterns = [
-    path('', react_fake_view, name='list'),
-    path('<str:slug>/', slug, name='slug'),
-    path('<str:slug>/<path:file_path>', slug, name='slug'),
+    url(r'^$', wiki_list, name='list'),
+    url(r'^(?P<slug>[^/]+)/$', slug, name='slug'),
+    url(r'^(?P<slug>[^/]+)/(?P<file_path>.+)$', slug, name='slug'),
+    url(r'^(?P<slug>[^/]+)/(?P<page_name>[^/]+)/edit/$', edit_page, name='edit_page'),
 ]

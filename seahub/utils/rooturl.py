@@ -26,7 +26,7 @@
 
 
 from django.conf import settings
-from django.urls import include, re_path
+from django.conf.urls import include, url
 from django.core.exceptions import ImproperlyConfigured
 
 
@@ -38,5 +38,5 @@ if hasattr(settings, "SITE_ROOT"):
                                    "using SITE_ROOT")
 
     urlpatterns = [
-        re_path(r'^%s' % settings.SITE_ROOT[1:], include(settings.SITE_ROOT_URLCONF)),
+        url(r'^%s' % settings.SITE_ROOT[1:], include(settings.SITE_ROOT_URLCONF)),
     ]

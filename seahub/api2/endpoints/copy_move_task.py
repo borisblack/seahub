@@ -1,14 +1,13 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-import json
-import logging
 import posixpath
+import logging
 
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 from django.utils.html import escape
 
 from seahub.api2.throttling import UserRateThrottle
@@ -18,7 +17,7 @@ from seahub.api2.views import HTTP_443_ABOVE_QUOTA
 
 from seahub.views import check_folder_permission
 from seahub.utils import check_filename_with_rename
-from seahub.utils.repo import get_repo_owner, parse_repo_perm
+from seahub.utils.repo import get_repo_owner
 from seahub.utils.file_op import check_file_lock
 from seahub.settings import MAX_PATH
 
@@ -140,16 +139,18 @@ class CopyMoveTaskView(APIView):
             current_size = 0
             if file_id:
                 current_size = seafile_api.get_file_size(src_repo.store_id,
-                                                         src_repo.version,
-                                                         file_id)
+                        src_repo.version, file_id)
+
+            if dir_id:
+                current_size = seafile_api.get_dir_size(src_repo.store_id,
+                        src_repo.version, dir_id)
 
             # check if above quota for dst repo
             if seafile_api.check_quota(dst_repo_id, current_size) < 0:
-                return api_error(HTTP_443_ABOVE_QUOTA, _("Out of quota."))
+                return api_error(HTTP_443_ABOVE_QUOTA, _(u"Out of quota."))
 
         new_dirent_name = check_filename_with_rename(dst_repo_id,
-                                                     dst_parent_dir,
-                                                     src_dirent_name)
+                dst_parent_dir, src_dirent_name)
 
         username = request.user.username
         if operation == 'move':
@@ -161,7 +162,7 @@ class CopyMoveTaskView(APIView):
             if dirent_type == 'dir' and src_repo_id == dst_repo_id and \
                     dst_parent_dir.startswith(src_dirent_path + '/'):
 
-                error_msg = _('Can not move folder %(src)s to its subfolder %(des)s') \
+                error_msg = _(u'Can not move directory %(src)s to its subdirectory %(des)s') \
                     % {'src': escape(src_dirent_path), 'des': escape(dst_parent_dir)}
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
@@ -169,8 +170,7 @@ class CopyMoveTaskView(APIView):
                 # check file lock
                 try:
                     is_locked, locked_by_me = check_file_lock(src_repo_id,
-                                                              src_dirent_path,
-                                                              username)
+                            src_dirent_path, username)
                 except Exception as e:
                     logger.error(e)
                     error_msg = 'Internal Server Error'
@@ -182,10 +182,8 @@ class CopyMoveTaskView(APIView):
 
             try:
                 res = seafile_api.move_file(src_repo_id, src_parent_dir,
-                                            json.dumps([src_dirent_name]),
-                                            dst_repo_id, dst_parent_dir,
-                                            json.dumps([new_dirent_name]),
-                                            replace=False, username=username,
+                                            src_dirent_name, dst_repo_id, dst_parent_dir,
+                                            new_dirent_name, replace=False, username=username,
                                             need_progress=1)
 
             except Exception as e:
@@ -195,17 +193,15 @@ class CopyMoveTaskView(APIView):
 
         if operation == 'copy':
             # permission check for src parent dir
-            if parse_repo_perm(check_folder_permission(
-                            request, src_repo_id, src_parent_dir)).can_copy is False:
+            if not check_folder_permission(request, src_repo_id, src_parent_dir):
                 error_msg = 'Permission denied.'
                 return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
             try:
                 res = seafile_api.copy_file(src_repo_id, src_parent_dir,
-                                            json.dumps([src_dirent_name]),
-                                            dst_repo_id, dst_parent_dir,
-                                            json.dumps([new_dirent_name]),
-                                            username=username, need_progress=1)
+                                            src_dirent_name, dst_repo_id, dst_parent_dir,
+                                            new_dirent_name, username=username,
+                                            need_progress=1)
             except Exception as e:
                 logger.error(e)
                 error_msg = 'Internal Server Error'

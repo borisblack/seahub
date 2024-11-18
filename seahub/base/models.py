@@ -1,19 +1,20 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import os
+import datetime
+import hashlib
 import logging
 from django.db import models
-from django.db.models import Q
 from django.utils import timezone
 
 from pysearpc import SearpcError
 from seaserv import seafile_api
 
 from seahub.auth.signals import user_logged_in
-from seahub.utils import within_time_range, gen_token, \
-        normalize_file_path, normalize_dir_path
+from seahub.group.models import GroupMessage
+from seahub.utils import calc_file_path_hash, within_time_range
 from seahub.utils.timeutils import datetime_to_isoformat_timestr
 from seahub.tags.models import FileUUIDMap
-from .fields import LowerCaseCharField
+from fields import LowerCaseCharField
 
 
 # Get an instance of a logger
@@ -37,27 +38,43 @@ class TimestampedModel(models.Model):
         ordering = ['-created_at', '-updated_at']
 
 
+class FileDiscuss(models.Model):
+    """
+    Model used to represents the relationship between group message and file/dir.
+    """
+    group_message = models.ForeignKey(GroupMessage)
+    repo_id = models.CharField(max_length=36)
+    path = models.TextField()
+    path_hash = models.CharField(max_length=12, db_index=True)
+
+    def save(self, *args, **kwargs):
+        if not self.path_hash:
+            self.path_hash = calc_file_path_hash(self.path)
+
+        super(FileDiscuss, self).save(*args, **kwargs)
+
+
 class FileCommentManager(models.Manager):
-    def add(self, repo_id, parent_path, item_name, author, comment, detail=''):
-        fileuuidmap = FileUUIDMap.objects.get_or_create_fileuuidmap(repo_id,
-                                                                    parent_path,
-                                                                    item_name,
+    def add(self, repo_id, parent_path, item_name, author, comment):
+        fileuuidmap = FileUUIDMap.objects.get_or_create_fileuuidmap(repo_id, 
+                                                                    parent_path, 
+                                                                    item_name, 
                                                                     False)
-        c = self.model(uuid=fileuuidmap, author=author, comment=comment, detail=detail)
+        c = self.model(uuid=fileuuidmap, author=author, comment=comment)
         c.save(using=self._db)
         return c
 
-    def add_by_file_path(self, repo_id, file_path, author, comment, detail=''):
+    def add_by_file_path(self, repo_id, file_path, author, comment):
         file_path = self.model.normalize_path(file_path)
         parent_path = os.path.dirname(file_path)
         item_name = os.path.basename(file_path)
 
-        return self.add(repo_id, parent_path, item_name, author, comment, detail)
+        return self.add(repo_id, parent_path, item_name, author, comment)
 
     def get_by_file_path(self, repo_id, file_path):
         parent_path = os.path.dirname(file_path)
         item_name = os.path.basename(file_path)
-        uuid = FileUUIDMap.objects.get_fileuuidmap_by_path(repo_id, parent_path,
+        uuid = FileUUIDMap.objects.get_fileuuidmap_by_path(repo_id, parent_path, 
                                                            item_name, False)
 
         objs = super(FileCommentManager, self).filter(
@@ -65,18 +82,9 @@ class FileCommentManager(models.Manager):
 
         return objs
 
-    def list_by_file_uuid(self, file_uuid):
-        objs = self.filter(uuid=file_uuid)
-        return objs
-
-    def add_by_file_uuid(self, file_uuid, author, comment, detail=''):
-        fileuuidmap = FileUUIDMap.objects.get_fileuuidmap_by_uuid(file_uuid)
-        return self.create(
-            uuid=fileuuidmap, author=author, comment=comment, detail=detail)
-
     def get_by_parent_path(self, repo_id, parent_path):
-        uuids = FileUUIDMap.objects.get_fileuuidmaps_by_parent_path(repo_id,
-                                                                    parent_path)
+        uuids = FileUUIDMap.objects.get_fileuuidmaps_by_parent_path(repo_id, 
+                                                                   parent_path)
         objs = super(FileCommentManager, self).filter(uuid__in=uuids)
         return objs
 
@@ -90,25 +98,14 @@ class FileComment(models.Model):
     comment = models.TextField()
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
-    resolved = models.BooleanField(default=False, db_index=True)
-    detail = models.TextField(default='')
-
     objects = FileCommentManager()
 
     @classmethod
     def normalize_path(self, path):
         return path.rstrip('/') if path != '/' else '/'
 
-    def to_dict(self, reply_queryset=None):
-        from seahub.api2.utils import user_to_dict
+    def to_dict(self):
         o = self
-        replies = []
-        if reply_queryset:
-            r = reply_queryset.filter(comment_id=o.pk)
-            for reply in r:
-                data = reply.to_dict()
-                data.update(user_to_dict(reply.author))
-                replies.append(data)
         return {
             'id': o.pk,
             'repo_id': o.uuid.repo_id,
@@ -116,14 +113,10 @@ class FileComment(models.Model):
             'item_name': o.uuid.filename,
             'comment': o.comment,
             'created_at': datetime_to_isoformat_timestr(o.created_at),
-            'updated_at': datetime_to_isoformat_timestr(o.updated_at),
-            'resolved': o.resolved,
-            'detail': o.detail,
-            'replies': replies,
         }
 
 
-# starred files
+########## starred files
 class StarredFile(object):
     def format_path(self):
         if self.path == "/":
@@ -148,41 +141,7 @@ class StarredFile(object):
         if not is_dir:
             self.name = path.split('/')[-1]
 
-
 class UserStarredFilesManager(models.Manager):
-
-    def get_starred_repos_by_user(self, email):
-
-        starred_repos = UserStarredFiles.objects.filter(email=email, path='/')
-        return starred_repos
-
-    def get_starred_item(self, email, repo_id, path):
-
-        path_list = [normalize_file_path(path), normalize_dir_path(path)]
-        starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
-                                                .filter(Q(path__in=path_list))
-
-        return starred_items[0] if len(starred_items) > 0 else None
-
-    def add_starred_item(self, email, repo_id, path, is_dir, org_id=-1):
-
-        starred_item = UserStarredFiles.objects.create(email=email,
-                                                       repo_id=repo_id,
-                                                       path=path,
-                                                       is_dir=is_dir,
-                                                       org_id=org_id)
-
-        return starred_item
-
-    def delete_starred_item(self, email, repo_id, path):
-
-        path_list = [normalize_file_path(path), normalize_dir_path(path)]
-        starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
-                                                .filter(Q(path__in=path_list))
-
-        for item in starred_items:
-            item.delete()
-
     def get_starred_files_by_username(self, username):
         """Get a user's starred files.
 
@@ -191,13 +150,13 @@ class UserStarredFilesManager(models.Manager):
         - `username`:
         """
         starred_files = super(UserStarredFilesManager, self).filter(
-            email=username, is_dir=False, org_id=-1)
+            email=username, org_id=-1)
 
         ret = []
         repo_cache = {}
         for sfile in starred_files:
             # repo still exists?
-            if sfile.repo_id in repo_cache:
+            if repo_cache.has_key(sfile.repo_id):
                 repo = repo_cache[sfile.repo_id]
             else:
                 try:
@@ -212,7 +171,7 @@ class UserStarredFilesManager(models.Manager):
 
             # file still exists?
             file_id = ''
-            # size = -1
+            size = -1
             if sfile.path != "/":
                 try:
                     file_id = seafile_api.get_file_id_by_path(sfile.repo_id,
@@ -224,9 +183,8 @@ class UserStarredFilesManager(models.Manager):
                     sfile.delete()
                     continue
 
-            # TODO: remove ``size`` from StarredFile
             f = StarredFile(sfile.org_id, repo, file_id, sfile.path,
-                            sfile.is_dir, 0)
+                            sfile.is_dir, 0) # TODO: remove ``size`` from StarredFile
             ret.append(f)
 
         '''Calculate files last modification time'''
@@ -247,10 +205,9 @@ class UserStarredFilesManager(models.Manager):
                 logger.error(e)
                 sfile.last_modified = 0
 
-        ret.sort(key=lambda x: x.last_modified, reverse=True)
+        ret.sort(lambda x, y: cmp(y.last_modified, x.last_modified))
 
         return ret
-
 
 class UserStarredFiles(models.Model):
     """Starred files are marked by users to get quick access to it on user
@@ -265,8 +222,16 @@ class UserStarredFiles(models.Model):
 
     objects = UserStarredFilesManager()
 
+########## user/group modules
+class UserEnabledModule(models.Model):
+    username = models.CharField(max_length=255, db_index=True)
+    module_name = models.CharField(max_length=20)
 
-# misc
+class GroupEnabledModule(models.Model):
+    group_id = models.CharField(max_length=10, db_index=True)
+    module_name = models.CharField(max_length=20)
+
+########## misc
 class UserLastLoginManager(models.Manager):
     def get_by_username(self, username):
         """Return last login record for a user, delete duplicates if there are
@@ -284,12 +249,10 @@ class UserLastLoginManager(models.Manager):
                 logger.warn('Delete duplicate user last login record: %s' % username)
             return ret
 
-
 class UserLastLogin(models.Model):
     username = models.CharField(max_length=255, db_index=True)
     last_login = models.DateTimeField(default=timezone.now)
     objects = UserLastLoginManager()
-
 
 def update_last_login(sender, user, **kwargs):
     """
@@ -301,10 +264,7 @@ def update_last_login(sender, user, **kwargs):
         user_last_login = UserLastLogin(username=user.username)
     user_last_login.last_login = timezone.now()
     user_last_login.save()
-
-
 user_logged_in.connect(update_last_login)
-
 
 class CommandsLastCheck(models.Model):
     """Record last check time for Django/custom commands.
@@ -312,6 +272,24 @@ class CommandsLastCheck(models.Model):
     command_type = models.CharField(max_length=100)
     last_check = models.DateTimeField()
 
+###### Deprecated
+class InnerPubMsg(models.Model):
+    """
+    Model used for leave message on inner pub page.
+    """
+    from_email = models.EmailField()
+    message = models.CharField(max_length=500)
+    timestamp = models.DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+class InnerPubMsgReply(models.Model):
+    reply_to = models.ForeignKey(InnerPubMsg)
+    from_email = models.EmailField()
+    message = models.CharField(max_length=150)
+    timestamp = models.DateTimeField(default=datetime.datetime.now)
+##############################
 
 class DeviceToken(models.Model):
     """
@@ -329,9 +307,7 @@ class DeviceToken(models.Model):
     def __unicode__(self):
         return "/".join(self.user, self.token)
 
-
 _CLIENT_LOGIN_TOKEN_EXPIRATION_SECONDS = 30
-
 
 class ClientLoginTokenManager(models.Manager):
     def get_username(self, tokenstr):
@@ -345,7 +321,6 @@ class ClientLoginTokenManager(models.Manager):
                                  _CLIENT_LOGIN_TOKEN_EXPIRATION_SECONDS):
             return None
         return username
-
 
 class ClientLoginToken(models.Model):
     # TODO: update sql/mysql.sql and sql/sqlite3.sql
@@ -384,70 +359,3 @@ class RepoSecretKey(models.Model):
     secret_key = models.CharField(max_length=44)
 
     objects = RepoSecretKeyManager()
-
-
-class UserMonitoredRepos(models.Model):
-    """
-    """
-    email = models.EmailField(db_index=True)
-    repo_id = models.CharField(max_length=36, db_index=True)
-    timestamp = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        unique_together = [["email", "repo_id"]]
-
-
-STATUS_WAITING = 'waiting'
-STATUS_SUCCESS = 'success'
-STATUS_ERROR = 'error'
-
-
-class ClientSSOTokenManager(models.Manager):
-    def new(self):
-        o = self.model()
-        o.save(using=self._db)
-        return o
-
-
-class ClientSSOToken(models.Model):
-    STATUS_CHOICES = (
-        (STATUS_WAITING, 'waiting'),
-        (STATUS_SUCCESS, 'success'),
-        (STATUS_ERROR, 'error'),
-    )
-
-    token = models.CharField(max_length=100, unique=True)
-    username = LowerCaseCharField(max_length=255, db_index=True, blank=True, null=True)
-    status = models.CharField(max_length=10, default=STATUS_WAITING, choices=STATUS_CHOICES)
-    api_key = models.CharField(max_length=40, blank=True, null=True)
-    created_at = models.DateTimeField(db_index=True, auto_now_add=True)
-    updated_at = models.DateTimeField(db_index=True, blank=True, null=True)
-    accessed_at = models.DateTimeField(db_index=True, blank=True, null=True)
-    objects = ClientSSOTokenManager()
-
-    def gen_token(self):
-        return gen_token(30) + gen_token(30)
-
-    def is_waiting(self):
-        return self.status == STATUS_WAITING
-
-    def is_success(self):
-        return self.status == STATUS_SUCCESS
-
-    def completed(self, username, api_key):
-        assert self.is_waiting() is True
-
-        self.username = username
-        self.api_key = api_key
-        self.status = STATUS_SUCCESS
-        self.updated_at = timezone.now()
-        self.save()
-
-    def accessed(self):
-        self.accessed_at = timezone.now()
-        self.save()
-
-    def save(self, *args, **kwargs):
-        if not self.token:
-            self.token = self.gen_token()
-        return super(ClientSSOToken, self).save(*args, **kwargs)

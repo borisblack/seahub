@@ -5,8 +5,8 @@ import logging
 import posixpath
 import datetime
 
-from django.utils.translation import gettext as _
-from urllib.parse import quote
+from django.utils.translation import ugettext as _
+from django.utils.http import urlquote
 from django.http import HttpResponse
 from django.views.decorators.http import condition
 from django.shortcuts import render
@@ -16,16 +16,13 @@ from seaserv import get_repo, get_file_id_by_path
 from seahub.auth.decorators import login_required_ajax, login_required
 from seahub.views import check_folder_permission
 from seahub.settings import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_EXTENSION, \
-    THUMBNAIL_ROOT
-import seahub.settings as settings
+    THUMBNAIL_ROOT, ENABLE_THUMBNAIL
 from seahub.thumbnail.utils import generate_thumbnail, \
     get_thumbnail_src, get_share_link_thumbnail_src
 from seahub.share.models import FileShare, check_share_link_common
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
-
-THUMBNAIL_CACHE_DAYS = getattr(settings, 'THUMBNAIL_CACHE_DAYS', 7)
 
 @login_required_ajax
 def thumbnail_create(request, repo_id):
@@ -39,19 +36,19 @@ def thumbnail_create(request, repo_id):
 
     repo = get_repo(repo_id)
     if not repo:
-        err_msg = _("Library does not exist.")
+        err_msg = _(u"Library does not exist.")
         return HttpResponse(json.dumps({"error": err_msg}), status=400,
                             content_type=content_type)
 
     path = request.GET.get('path', None)
     if not path:
-        err_msg = _("Invalid arguments.")
+        err_msg = _(u"Invalid arguments.")
         return HttpResponse(json.dumps({"error": err_msg}), status=400,
                             content_type=content_type)
 
-    if repo.encrypted or \
+    if repo.encrypted or not ENABLE_THUMBNAIL or \
         check_folder_permission(request, repo_id, path) is None:
-        err_msg = _("Permission denied.")
+        err_msg = _(u"Permission denied.")
         return HttpResponse(json.dumps({"error": err_msg}), status=403,
                             content_type=content_type)
 
@@ -59,7 +56,7 @@ def thumbnail_create(request, repo_id):
     success, status_code = generate_thumbnail(request, repo_id, size, path)
     if success:
         src = get_thumbnail_src(repo_id, size, path)
-        result['encoded_thumbnail_src'] = quote(src)
+        result['encoded_thumbnail_src'] = urlquote(src)
         return HttpResponse(json.dumps(result), content_type=content_type)
     else:
         err_msg = _('Failed to create thumbnail.')
@@ -100,7 +97,7 @@ def thumbnail_get(request, repo_id, size, path):
         return HttpResponse()
 
     # check if is allowed
-    if repo.encrypted or \
+    if repo.encrypted or not ENABLE_THUMBNAIL or \
         check_folder_permission(request, repo_id, path) is None:
         return HttpResponse()
 
@@ -119,16 +116,13 @@ def thumbnail_get(request, repo_id, size, path):
         try:
             with open(thumbnail_file, 'rb') as f:
                 thumbnail = f.read()
-            resp = HttpResponse(content=thumbnail,
+            return HttpResponse(content=thumbnail,
                                 content_type='image/' + THUMBNAIL_EXTENSION)
-            
-            resp['Cache-Control'] = 'private, max-age=%s' % (3600 * 24 * THUMBNAIL_CACHE_DAYS)
-            return resp
         except IOError as e:
             logger.error(e)
-            return HttpResponse(status=500)
+            return HttpResponse()
     else:
-        return HttpResponse(status=status_code)
+        return HttpResponse()
 
 def get_real_path_by_fs_and_req_path(fileshare, req_path):
     """ Return the real path of a file.
@@ -157,25 +151,25 @@ def share_link_thumbnail_create(request, token):
 
     fileshare = FileShare.objects.get_valid_file_link_by_token(token)
     if not fileshare:
-        err_msg = _("Invalid token.")
+        err_msg = _(u"Invalid token.")
         return HttpResponse(json.dumps({"error": err_msg}), status=400,
                             content_type=content_type)
 
     repo_id = fileshare.repo_id
     repo = get_repo(repo_id)
     if not repo:
-        err_msg = _("Library does not exist.")
+        err_msg = _(u"Library does not exist.")
         return HttpResponse(json.dumps({"error": err_msg}), status=400,
                             content_type=content_type)
 
-    if repo.encrypted:
-        err_msg = _("Permission denied.")
+    if repo.encrypted or not ENABLE_THUMBNAIL:
+        err_msg = _(u"Permission denied.")
         return HttpResponse(json.dumps({"error": err_msg}), status=403,
                             content_type=content_type)
 
     req_path = request.GET.get('path', None)
     if not req_path or '../' in req_path:
-        err_msg = _("Invalid arguments.")
+        err_msg = _(u"Invalid arguments.")
         return HttpResponse(json.dumps({"error": err_msg}), status=400,
                             content_type=content_type)
 
@@ -185,7 +179,7 @@ def share_link_thumbnail_create(request, token):
     success, status_code = generate_thumbnail(request, repo_id, size, real_path)
     if success:
         src = get_share_link_thumbnail_src(token, size, req_path)
-        result['encoded_thumbnail_src'] = quote(src)
+        result['encoded_thumbnail_src'] = urlquote(src)
         return HttpResponse(json.dumps(result), content_type=content_type)
     else:
         err_msg = _('Failed to create thumbnail.')
@@ -251,7 +245,7 @@ def share_link_thumbnail_get(request, token, size, path):
         return HttpResponse()
 
     # check if is allowed
-    if repo.encrypted:
+    if repo.encrypted or not ENABLE_THUMBNAIL:
         return HttpResponse()
 
     success = True

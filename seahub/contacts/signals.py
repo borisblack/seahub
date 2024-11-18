@@ -1,4 +1,4 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-from django.dispatch import Signal
+import django.dispatch
 
-mail_sended = Signal()
+mail_sended = django.dispatch.Signal(providing_args=["user", "email"])

@@ -1,12 +1,12 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 from hashlib import sha1
 import hmac
 from struct import pack
 from time import time
 
-import six
+from django.utils import six
 
 if six.PY3:
     iterbytes = iter

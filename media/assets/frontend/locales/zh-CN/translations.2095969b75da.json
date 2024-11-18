@@ -1,0 +1,116 @@
+{
+  "bold": "粗体",
+  "italic": "斜体",
+  "inline_code": "代码",
+  "header_one": "一级标题",
+  "header_two": "二级标题",
+  "header_three": "三级标题",
+  "header_four": "四级标题",
+  "header_five": "五级标题",
+  "header_six": "六级标题",
+  "paragraph": "段落",
+  "quote": "引用",
+  "ordered_list": "有序列表",
+  "unordered_list": "无序列表",
+  "check_list_item": "任务列表",
+  "insert_image": "插入图片",
+  "code": "行内代码",
+  "code_block": "代码块",
+  "insert_link": "添加链接",
+  "insert_table": "添加表格",
+  "save": "保存",
+  "more": "更多",
+  "invalid_url": "无效链接",
+  "enter_the_url_of_the_image": "请输入图片的链接",
+  "enter_the_url_of_the_link": "请输入链接地址",
+  "submit": "提交",
+  "cancel": "取消",
+  "switch_to_plain_text_editor": "切换至普通文本编辑器",
+  "switch_to_rich_text_editor": "切换至富文本编辑器",
+  "switch_to_viewer": "切换到只读模式",
+  "help": "帮助",
+  "remove_table": "清除表格",
+  "column": "列",
+  "row": "行",
+  "set_align": "对齐方式",
+  "center": "居中",
+  "left": "左对齐",
+  "right": "右对齐",
+  "file_saved": "保存文件成功",
+  "star": "添加星标",
+  "unstar": "移除星标",
+  "file_failed_to_save": "保存文件失败",
+  "back_to_parent_directory": "返回上级目录",
+  "edit": "编辑",
+  "copy": "复制",
+  "copied": "已复制",
+  "internal_link": "内部链接",
+  "internal_link_desc": "内部链接是指向文件或目录的链接，只有对该文件或目录有访问权限的人可以访问。",
+  "remove_link": "删除链接",
+  "generate_link": "生成链接",
+  "add_password_protection": "增加密码保护",
+  "automatic_password_generation": "自动生成密码",
+  "days": "天数",
+  "add_automatic_expiration": "增加自动过期",
+  "please_input_password_again": "请再次输入密码",
+  "show_hide_password": "显示/隐藏密码",
+  "password_at_least_8_characters": "密码（至少8个字符）",
+  "share": "分享",
+  "please_enter_the_shared_password": "请输入分享密码",
+  "the_password_length_should_be_more_than_8_bytes": "密码长度应该大于8位",
+  "please_enter_an_expiration_date": "请输入过期时间",
+  "the_two_passwords_do_not_match_please_enter_again": "两次输入密码不一致，请再次输入",
+  "the_expiration_time_should_be_greater_than_0": "过期时间应该大于0天",
+  "the_password_is_too_short": "密码太短",
+  "return_to_wiki_page": "返回维基页面",
+  "insert_network_image": "插入网络图片",
+  "upload_local_image": "上传本地图片",
+  "add_link": "加入链接",
+  "link_title": "链接标题",
+  "local_draft": "本地草稿",
+  "use_draft": "使用草稿",
+  "delete_draft": "删除草稿",
+  "you_have_an_unsaved_draft_do_you_like_to_use_it": "有未保存的草稿，使用草稿吗？",
+  "local_draft_saved": "本地草稿已保存",
+  "file_history": "文件历史",
+  "history_version": "历史版本",
+  "back_to_viewer": "返回查看页面",
+  "userHelp": {
+    "title": "键盘快捷键",
+    "userHelpData":[
+      {
+        "shortcutType":"块级操作",
+        "shortcutData" :{
+          "块级引用": [">", "space"],
+          "一级标题":["#", "space"],
+          "二级标题":["##", "space"],
+          "三级标题":["###", "space"],
+          "列表":["* / + / -", "space"],
+          "有序列表":["1.", "space"]
+        }
+      },
+      {
+        "shortcutType":"行级操作",
+        "shortcutData" :{
+          "加粗": ["**bold** / __bold__", "space"],
+          "斜体":["*italic* / _italic_", "space"],
+          "斜体加粗":["***italic*** / ___italic___", "space"],
+          "行内代码":["`code`", "space"]
+        }
+      },
+      {
+        "shortcutType":"文件保存",
+        "shortcutData" :{
+          "保存修改": [["Ctrl","Cmd"], "S"]
+        }
+      },
+      {
+        "shortcutType":"图片操作",
+        "shortcutData" :{
+          "上传截图": [["Ctrl","Cmd"], "V"],
+          "拖拽任意图片上传":[]
+        }
+      }
+    ]
+  }
+}

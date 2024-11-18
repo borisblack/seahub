@@ -50,7 +50,7 @@ settings.AUTHENTICATION_BACKENDS += (
     'shibboleth.backends.ShibbolethRemoteUserBackend',
 )
 
-settings.MIDDLEWARE.append(
+settings.MIDDLEWARE_CLASSES += (
     'shibboleth.middleware.ShibbolethRemoteUserMiddleware',
 )
 
@@ -86,8 +86,8 @@ class AttributesTest(unittest.TestCase):
         self.assertEqual(user.email, 'Sample_Developer@school.edu')
         self.assertEqual(user.first_name, 'Sample')
         self.assertEqual(user.last_name, 'Developer')
-        self.assertTrue(user.is_authenticated)
-        self.assertFalse(user.is_anonymous)
+        self.assertTrue(user.is_authenticated())
+        self.assertFalse(user.is_anonymous())
 
 class LogoutTest(unittest.TestCase):   
     def setUp(self):

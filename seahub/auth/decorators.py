@@ -6,9 +6,10 @@ except ImportError:
 
 from seahub.auth import REDIRECT_FIELD_NAME
 from django.http import HttpResponseRedirect, HttpResponse, Http404
-from urllib.parse import quote
+from django.utils.decorators import available_attrs
+from django.utils.http import urlquote
 import json
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 def user_passes_test(test_func, login_url=None, redirect_field_name=REDIRECT_FIELD_NAME):
     """
@@ -24,10 +25,10 @@ def user_passes_test(test_func, login_url=None, redirect_field_name=REDIRECT_FIE
         def _wrapped_view(request, *args, **kwargs):
             if test_func(request.user):
                 return view_func(request, *args, **kwargs)
-            path = quote(request.get_full_path())
+            path = urlquote(request.get_full_path())
             tup = login_url, redirect_field_name, path
             return HttpResponseRedirect('%s?%s=%s' % tup)
-        return wraps(view_func)(_wrapped_view)
+        return wraps(view_func, assigned=available_attrs(view_func))(_wrapped_view)
     return decorator
 
 
@@ -37,7 +38,7 @@ def login_required(function=None, redirect_field_name=REDIRECT_FIELD_NAME):
     to the log-in page if necessary.
     """
     actual_decorator = user_passes_test(
-        lambda u: u.is_authenticated,
+        lambda u: u.is_authenticated(),
         redirect_field_name=redirect_field_name
     )
     if function:
@@ -62,10 +63,10 @@ def login_required_ajax(function=None,redirect_field_name=None):
     """
     def _decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
-            if not request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            if not request.is_ajax():
                 raise Http404
 
-            if request.user.is_authenticated:
+            if request.user.is_authenticated():
                 return view_func(request, *args, **kwargs)
             else:
                 content_type = 'application/json; charset=utf-8'

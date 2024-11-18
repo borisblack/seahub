@@ -2,7 +2,7 @@ import requests
 from mock import Mock
 from mock import patch
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 
 from seahub.test_utils import BaseTestCase
 
@@ -55,7 +55,7 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'common_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_base.html')
         assert resp.context['err'] == 'File preview unsupported'
 
     @patch('seahub.views.file.FILE_PREVIEW_MAX_SIZE', -1)
@@ -67,7 +67,7 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'text_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_base.html')
         assert 'File size surpasses -1' in resp.context['err'] and \
             'can not be opened online.' in resp.context['err']
 
@@ -78,10 +78,10 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'text_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_text.html')
         assert resp.context['filetype'].lower() == 'text'
         assert resp.context['file_content'] == ''
-        # assert resp.context['encoding'] == 'utf-8'
+        assert resp.context['encoding'] == 'utf-8'
 
     def test_ms_doc_without_office_converter(self):
         self.login_as(self.user)
@@ -92,7 +92,7 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'document_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_base.html')
 
     # @patch('seahub.views.file.HAS_OFFICE_CONVERTER', True)
     # @patch('seahub.views.file.can_preview_file')
@@ -130,7 +130,7 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'common_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_pdf.html')
         assert resp.context['filetype'].lower() == 'pdf'
 
         # token for doc file is one time only
@@ -138,7 +138,7 @@ class ViewLibFileTest(BaseTestCase):
         r = requests.get(raw_path)
         self.assertEqual(200, r.status_code)
         r = requests.get(raw_path)
-        self.assertEqual(403, r.status_code)
+        self.assertEqual(400, r.status_code)
 
     def test_img_file(self):
         self.login_as(self.user)
@@ -152,7 +152,7 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'common_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_image.html')
         assert resp.context['filetype'].lower() == 'image'
         assert resp.context['img_next'] == '/foo2.jpg'
         assert resp.context['img_prev'] is None
@@ -162,7 +162,7 @@ class ViewLibFileTest(BaseTestCase):
         r = requests.get(raw_path)
         self.assertEqual(200, r.status_code)
         r = requests.get(raw_path)
-        self.assertEqual(403, r.status_code)
+        self.assertEqual(400, r.status_code)
 
     def test_video_file(self):
         self.login_as(self.user)
@@ -173,9 +173,13 @@ class ViewLibFileTest(BaseTestCase):
 
         resp = self.client.get(url)
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'common_file_view_react.html')
+        self.assertTemplateUsed(resp, 'view_file_video.html')
         assert resp.context['filetype'].lower() == 'video'
 
+        raw_path = resp.context['raw_path']
+        for _ in range(3):      # token for video is not one time only
+            r = requests.get(raw_path)
+            self.assertEqual(200, r.status_code)
 
     def test_can_download(self):
         self.login_as(self.user)
@@ -183,7 +187,12 @@ class ViewLibFileTest(BaseTestCase):
         url = reverse('view_lib_file', args=[self.repo.id, self.file]) + '?dl=1'
         resp = self.client.get(url)
         self.assertEqual(302, resp.status_code)
-        assert '8082/repos/' in resp.get('location')
+        assert '8082/files/' in resp.get('location')
+
+        resp = requests.request('GET', resp.get('location'))
+        cont_disp = resp.headers['content-disposition']
+        assert 'inline' not in cont_disp
+        assert 'attachment' in cont_disp
 
     def test_can_view_raw(self):
         self.login_as(self.user)

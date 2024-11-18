@@ -1,17 +1,14 @@
 import json
-import pytest
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 
 from seaserv import seafile_api, ccnet_api
 
 from tests.common.utils import randstring
 
-from seahub.test_utils import BaseTestCase, TRAVIS
+from seahub.test_utils import BaseTestCase
 from seahub.share.models import ExtraGroupsSharePermission
-from seahub.constants import (
-    PERMISSION_ADMIN, PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT)
-
+from seahub.constants import PERMISSION_ADMIN
 
 class GroupLibrariesTest(BaseTestCase):
 
@@ -78,28 +75,6 @@ class GroupLibrariesTest(BaseTestCase):
 
         group_repos = seafile_api.get_repos_by_group(self.group_id)
         assert len(group_repos) == 1
-
-    @pytest.mark.skipif(TRAVIS, reason="pro only")
-    def test_can_create_with_perms(self):
-        group_repos = seafile_api.get_repos_by_group(self.group_id)
-        assert len(group_repos) == 0
-
-        self.login_as(self.user)
-
-        for perm in [PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT]:
-            repo_name = randstring(6)
-            resp = self.client.post(self.group_libraries_url, {
-                'repo_name': repo_name,
-                'permission': perm
-            })
-            self.assertEqual(200, resp.status_code)
-
-            json_resp = json.loads(resp.content)
-            assert json_resp['repo_name'] == repo_name
-            assert json_resp['permission'] == perm
-
-        group_repos = seafile_api.get_repos_by_group(self.group_id)
-        assert len(group_repos) == 2
 
     def test_create_with_login_user_is_not_group_member(self):
 
@@ -187,6 +162,20 @@ class GroupLibraryTest(BaseTestCase):
         group_repos = seafile_api.get_repos_by_group(self.group_id)
         assert len(group_repos) == 1
 
+        # add admin user to group
+        ccnet_api.group_add_member(self.group_id, self.user_name, self.admin_name)
+
+        # transfer repo to admin user
+        library_url = reverse('api-v2.1-admin-library', args=[self.repo_id])
+        data = 'owner=%s' % self.admin_name
+        resp = self.client.put(library_url, data, 'application/x-www-form-urlencoded')
+
+        # admin user can delete
+        resp = self.client.delete(self.group_library_url)
+        self.assertEqual(200, resp.status_code)
+
+        group_repos = seafile_api.get_repos_by_group(self.group_id)
+        assert len(group_repos) == 0
 
     def test_delete_if_login_user_is_group_staff(self):
 
@@ -214,7 +203,7 @@ class GroupLibraryTest(BaseTestCase):
 
         self.login_as(self.admin)
 
-        # commont user can not delete
+        # admin user can not delete
         resp = self.client.delete(self.group_library_url)
         self.assertEqual(403, resp.status_code)
 
@@ -226,12 +215,7 @@ class GroupLibraryTest(BaseTestCase):
         ExtraGroupsSharePermission.objects.create_share_permission(
                 self.repo_id, self.group_id, PERMISSION_ADMIN)
 
-        # repo admin user(not group admin) can not delete
-        resp = self.client.delete(self.group_library_url)
-        self.assertEqual(403, resp.status_code)
-
-        # repo admin user(also is group admin) can delete
-        ccnet_api.group_set_admin(self.group_id, self.admin_name)
+        # admin user can delete
         resp = self.client.delete(self.group_library_url)
         self.assertEqual(200, resp.status_code)
 

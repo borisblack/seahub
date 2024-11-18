@@ -3,16 +3,16 @@
 import datetime as dt
 from datetime import datetime
 import re
+import time
 
-import pytz
 from django import template
 from django.core.cache import cache
 from django.utils.safestring import mark_safe
 from django.utils import translation, formats
 from django.utils.dateformat import DateFormat
-from django.utils.translation import gettext as _
-from django.utils.translation import gettext, ngettext
-from django.utils.timezone import get_current_timezone
+from django.utils.translation import ugettext as _
+from django.utils.translation import ugettext, ungettext
+from django.utils.translation import pgettext
 from django.utils.html import escape
 
 from seahub.base.accounts import User
@@ -21,15 +21,13 @@ from seahub.profile.settings import NICKNAME_CACHE_TIMEOUT, NICKNAME_CACHE_PREFI
     EMAIL_ID_CACHE_TIMEOUT, EMAIL_ID_CACHE_PREFIX, CONTACT_CACHE_TIMEOUT, \
     CONTACT_CACHE_PREFIX
 from seahub.cconvert import CConvert
-from seahub.settings import TIME_ZONE
+from seahub.po import TRANSLATION_MAP
 from seahub.shortcuts import get_first_object_or_none
 from seahub.utils import normalize_cache_key, CMMT_DESC_PATT
 from seahub.utils.html import avoid_wrapping
 from seahub.utils.file_size import get_file_size_unit
 
 register = template.Library()
-current_timezone = get_current_timezone()
-
 
 @register.filter(name='tsstr_sec')
 def tsstr_sec(value):
@@ -51,29 +49,27 @@ def tsstr_day(value):
 FILEEXT_ICON_MAP = {
 
     # text file
+    'md': 'txt.png',
     'txt': 'txt.png',
 
-    # markdown file
-    'md': 'md.png',
-
     # pdf file
-    'pdf': 'pdf.png',
+    'pdf' : 'pdf.png',
 
     # document file
-    'doc': 'word.png',
-    'docx': 'word.png',
-    'odt': 'word.png',
-    'fodt': 'word.png',
+    'doc' : 'word.png',
+    'docx' : 'word.png',
+    'odt' : 'word.png',
+    'fodt' : 'word.png',
 
-    'ppt': 'ppt.png',
-    'pptx': 'ppt.png',
-    'odp': 'ppt.png',
-    'fodp': 'ppt.png',
+    'ppt' : 'ppt.png',
+    'pptx' : 'ppt.png',
+    'odp' : 'ppt.png',
+    'fodp' : 'ppt.png',
 
-    'xls': 'excel.png',
-    'xlsx': 'excel.png',
-    'ods': 'excel.png',
-    'fods': 'excel.png',
+    'xls' : 'excel.png',
+    'xlsx' : 'excel.png',
+    'ods' : 'excel.png',
+    'fods' : 'excel.png',
 
     # video
     'mp4': 'video.png',
@@ -85,67 +81,58 @@ FILEEXT_ICON_MAP = {
     'rmvb': 'video.png',
 
     # music file
-    'mp3': 'music.png',
-    'oga': 'music.png',
-    'ogg': 'music.png',
-    'wav': 'music.png',
-    'flac': 'music.png',
-    'opus': 'music.png',
-    'aac': 'music.png',
-    'ac3': 'music.png',
-    'wma': 'music.png',
+    'mp3' : 'music.png',
+    'oga' : 'music.png',
+    'ogg' : 'music.png',
+    'flac' : 'music.png',
+    'aac' : 'music.png',
+    'ac3' : 'music.png',
+    'wma' : 'music.png',
 
     # image file
-    'jpg': 'pic.png',
-    'jpeg': 'pic.png',
-    'png': 'pic.png',
-    'svg': 'pic.png',
-    'gif': 'pic.png',
-    'bmp': 'pic.png',
-    'ico': 'pic.png',
-    'psd': 'psd.png',
-
-    # zip file
-    'zip': 'zip.png',
-    'rar': 'zip.png',
-    'tar': 'zip.png',
-
-    # style file
-    'css': 'css.png',
-
-    # sdoc file
-    'sdoc': 'sdoc.png',
-    'sdoc_notification': 'sdoc_notification.ico',
+    'jpg' : 'pic.png',
+    'jpeg' : 'pic.png',
+    'png' : 'pic.png',
+    'svg' : 'pic.png',
+    'gif' : 'pic.png',
+    'bmp' : 'pic.png',
+    'ico' : 'pic.png',
 
     # default
-    'default': 'file.png',
+    'default' : 'file.png',
 }
 @register.filter(name='file_icon_filter')
-def file_icon_filter(value):
+def file_icon_filter(value, size=None):
     """Get file icon according to the file postfix"""
     if value.rfind('.') > 0:
         file_ext = value.split('.')[-1].lower()
     else:
         file_ext = None
 
-    if file_ext and file_ext in FILEEXT_ICON_MAP:
-        return '256/' + FILEEXT_ICON_MAP.get(file_ext)
+    if file_ext and FILEEXT_ICON_MAP.has_key(file_ext):
+        if size == 192:
+            return '192/' + FILEEXT_ICON_MAP.get(file_ext)
+        else:
+            return '24/' + FILEEXT_ICON_MAP.get(file_ext)
     else:
-        return '256/' + FILEEXT_ICON_MAP.get('default')
+        if size == 192:
+            return '192/' + FILEEXT_ICON_MAP.get('default')
+        else:
+            return '24/' + FILEEXT_ICON_MAP.get('default')
 
 # This way of translation looks silly, but works well.
 COMMIT_MSG_TRANSLATION_MAP = {
-    'Added': _('Added'),
-    'Deleted': _('Deleted'),
-    'Removed': _('Removed'),
-    'Modified': _('Modified'),
-    'Renamed': _('Renamed'),
-    'Moved': _('Moved'),
-    'Added directory': _('Added folder'),
-    'Removed directory': _('Removed folder'),
-    'Renamed directory': _('Renamed folder'),
-    'Moved directory': _('Moved folder'),
-    'Added or modified': _('Added or modified'),
+    'Added' : _('Added'),
+    'Deleted' : _('Deleted'),
+    'Removed' : _('Removed'),
+    'Modified' : _('Modified'),
+    'Renamed' : _('Renamed'),
+    'Moved' : _('Moved'),
+    'Added directory' : _('Added directory'),
+    'Removed directory' : _('Removed directory'),
+    'Renamed directory' : _('Renamed directory'),
+    'Moved directory' : _('Moved directory'),
+    'Added or modified' : _('Added or modified'),
 }
 @register.filter(name='translate_commit_desc')
 def translate_commit_desc(value):
@@ -167,7 +154,7 @@ def translate_commit_desc(value):
                 {'file':matchobj.group(1), 'time':matchobj.group(2)}
         return re.sub('Reverted file "(.*)" to status at (.*)', repl, value)
     elif value.startswith('Recovered deleted directory'):
-        return value.replace('Recovered deleted directory', _('Recovered deleted folder'))
+        return value.replace('Recovered deleted directory', _('Recovered deleted directory'))
     elif value.startswith('Changed library'):
         return value.replace('Changed library name or description', _('Changed library name or description'))
     elif value.startswith('Merged') or value.startswith('Auto merge'):
@@ -177,7 +164,7 @@ def translate_commit_desc(value):
     else:
         # Use regular expression to translate commit description.
         # Commit description has two forms, e.g., 'Added "foo.txt" and 3 more files.' or 'Added "foo.txt".'
-        operations = '|'.join(list(COMMIT_MSG_TRANSLATION_MAP.keys()))
+        operations = '|'.join(COMMIT_MSG_TRANSLATION_MAP.keys())
         patt = r'(%s) "(.*)"\s?(and ([0-9]+) more (files|directories))?' % operations
 
         ret_list = []
@@ -199,14 +186,14 @@ def translate_commit_desc(value):
 
             if has_more:
                 if translation.get_language() == 'zh-cn':
-                    typ = '文件' if more_type == 'files' else '目录'
-                    ret = op_trans + ' "' + file_name + '"以及另外' + n_files + '个' + typ + '.'
+                    typ = u'文件' if more_type == 'files' else u'目录'
+                    ret = op_trans + u' "' + file_name + u'"以及另外' + n_files + u'个' + typ + '.'
                 # elif translation.get_language() == 'ru':
                 #     ret = ...
                 else:
                     ret = e
             else:
-                ret = op_trans + ' "' + file_name + '".'
+                ret = op_trans + u' "' + file_name + u'".'
             ret_list.append(ret)
 
         return '\n'.join(ret_list)
@@ -238,7 +225,7 @@ def translate_commit_desc_escape(value):
                 {'file':matchobj.group(1), 'time':matchobj.group(2)}
         return_value = escape(re.sub('Reverted file "(.*)" to status at (.*)', repl, value))
     elif value.startswith('Recovered deleted directory'):
-        return_value = escape(value.replace('Recovered deleted directory', _('Recovered deleted folder')))
+        return_value = escape(value.replace('Recovered deleted directory', _('Recovered deleted directory')))
     elif value.startswith('Changed library'):
         return_value = escape(value.replace('Changed library name or description', _('Changed library name or description')))
     elif value.startswith('Merged') or value.startswith('Auto merge'):
@@ -248,7 +235,7 @@ def translate_commit_desc_escape(value):
     else:
         # Use regular expression to translate commit description.
         # Commit description has two forms, e.g., 'Added "foo.txt" and 3 more files.' or 'Added "foo.txt".'
-        operations = '|'.join(list(COMMIT_MSG_TRANSLATION_MAP.keys()))
+        operations = '|'.join(COMMIT_MSG_TRANSLATION_MAP.keys())
         patt = r'(%s) "(.*)"\s?(and ([0-9]+) more (files|directories))?' % operations
 
         for e in value.split('\n'):
@@ -271,14 +258,14 @@ def translate_commit_desc_escape(value):
 
             if has_more:
                 if translation.get_language() == 'zh-cn':
-                    typ = '文件' if more_type == 'files' else '目录'
-                    ret = op_trans + ' "' + file_name + '"以及另外' + n_files + '个' + typ + '.'
+                    typ = u'文件' if more_type == 'files' else u'目录'
+                    ret = op_trans + u' "' + file_name + u'"以及另外' + n_files + u'个' + typ + '.'
                 # elif translation.get_language() == 'ru':
                 #     ret = ...
                 else:
                     ret = e
             else:
-                ret = op_trans + ' "' + file_name + '".'
+                ret = op_trans + u' "' + file_name + u'".'
 
             # if not match, this commit desc will not convert link, so
             # escape it
@@ -291,7 +278,7 @@ def translate_commit_desc_escape(value):
 
 @register.filter(name='translate_seahub_time')
 def translate_seahub_time(value, autoescape=None):
-    if isinstance(value, int) or isinstance(value, int): # check whether value is int
+    if isinstance(value, int) or isinstance(value, long): # check whether value is int
         try:
             val = datetime.fromtimestamp(value) # convert timestamp to datetime
         except ValueError as e:
@@ -306,17 +293,12 @@ def translate_seahub_time(value, autoescape=None):
         translated_time = escape(translated_time)
 
     timestring = val.isoformat()
-    if val.tzinfo is None:
-        tzinfo = pytz.timezone(TIME_ZONE)
-        val = tzinfo.localize(val)
     titletime = DateFormat(val).format('r')
 
     time_with_tag = '<time datetime="'+timestring+'" is="relative-time" title="'+titletime+'" >'+translated_time+'</time>'
 
     return mark_safe(time_with_tag)
 
-
-@register.filter(name='translate_seahub_time_str')
 def translate_seahub_time_str(val):
     """Convert python datetime to human friendly format."""
 
@@ -334,27 +316,27 @@ def translate_seahub_time_str(val):
     if days * 24 * 60 * 60 + seconds > limit:
         return val.strftime("%Y-%m-%d")
     elif days > 0:
-        ret = ngettext(
+        ret = ungettext(
             '%(days)d day ago',
             '%(days)d days ago',
             days ) % { 'days': days }
         return ret
     elif seconds > 60 * 60:
         hours = seconds / 3600
-        ret = ngettext(
+        ret = ungettext(
             '%(hours)d hour ago',
             '%(hours)d hours ago',
             hours ) % { 'hours': hours }
         return ret
     elif seconds > 60:
         minutes = seconds/60
-        ret = ngettext(
+        ret = ungettext(
             '%(minutes)d minute ago',
             '%(minutes)d minutes ago',
             minutes ) % { 'minutes': minutes }
         return ret
     elif seconds > 0:
-        ret = ngettext(
+        ret = ungettext(
             '%(seconds)d second ago',
             '%(seconds)d seconds ago',
             seconds ) % { 'seconds': seconds }
@@ -380,8 +362,7 @@ def email2nickname(value):
     if profile is not None and profile.nickname and profile.nickname.strip():
         nickname = profile.nickname.strip()
     else:
-        contact_email = email2contact_email(value)
-        nickname = contact_email.split('@')[0]
+        nickname = value.split('@')[0]
 
     cache.set(key, nickname, NICKNAME_CACHE_TIMEOUT)
     return nickname
@@ -480,9 +461,9 @@ def char2pinyin(value):
 @register.filter(name='translate_permission')
 def translate_permission(value):
     if value == 'rw':
-        return _('Read-Write')
+        return _(u'Read-Write')
     elif value == 'r':
-        return _('Read-Only')
+        return _(u'Read-Only')
     else:
         return ''
 
@@ -506,7 +487,7 @@ def seahub_filesizeformat(bytes):
     try:
         bytes = float(bytes)
     except (TypeError, ValueError, UnicodeDecodeError):
-        value = ngettext("%(size)d byte", "%(size)d bytes", 0) % {'size': 0}
+        value = ungettext("%(size)d byte", "%(size)d bytes", 0) % {'size': 0}
         return avoid_wrapping(value)
 
     filesize_number_format = lambda value: formats.number_format(round(value, 1), 1)
@@ -518,16 +499,16 @@ def seahub_filesizeformat(bytes):
     PB = get_file_size_unit('PB')
 
     if bytes < KB:
-        value = ngettext("%(size)d byte", "%(size)d bytes", bytes) % {'size': bytes}
+        value = ungettext("%(size)d byte", "%(size)d bytes", bytes) % {'size': bytes}
     elif bytes < MB:
-        value = gettext("%s KB") % filesize_number_format(bytes / KB)
+        value = ugettext("%s KB") % filesize_number_format(bytes / KB)
     elif bytes < GB:
-        value = gettext("%s MB") % filesize_number_format(bytes / MB)
+        value = ugettext("%s MB") % filesize_number_format(bytes / MB)
     elif bytes < TB:
-        value = gettext("%s GB") % filesize_number_format(bytes / GB)
+        value = ugettext("%s GB") % filesize_number_format(bytes / GB)
     elif bytes < PB:
-        value = gettext("%s TB") % filesize_number_format(bytes / TB)
+        value = ugettext("%s TB") % filesize_number_format(bytes / TB)
     else:
-        value = gettext("%s PB") % filesize_number_format(bytes / PB)
+        value = ugettext("%s PB") % filesize_number_format(bytes / PB)
 
     return avoid_wrapping(value)

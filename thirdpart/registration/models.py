@@ -8,11 +8,10 @@ from django.conf import settings
 from django.db import models
 # from django.db import transaction
 from django.template.loader import render_to_string
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ugettext_lazy as _
 
 from seahub.base.accounts import User
 from seahub.utils import send_html_email
-from seahub.profile.models import Profile
 
 SHA1_RE = re.compile('^[a-f0-9]{40}$')
 
@@ -111,9 +110,9 @@ class RegistrationManager(models.Manager):
         username and a random salt.
         
         """
-        salt = hashlib.sha1(str(random.random()).encode('utf-8')).hexdigest()[:5].encode('utf-8')
+        salt = hashlib.sha1(str(random.random())).hexdigest()[:5]
         username = user.username
-        if isinstance(username, str):
+        if isinstance(username, unicode):
             username = username.encode('utf-8')
         activation_key = hashlib.sha1(salt+username).hexdigest()
         return self.create(emailuser_id=user.id,
@@ -185,7 +184,7 @@ class RegistrationProfile(models.Model):
     account registration and activation.
     
     """
-    ACTIVATED = "ALREADY_ACTIVATED"
+    ACTIVATED = u"ALREADY_ACTIVATED"
     
 #    user = models.ForeignKey(User, unique=True, verbose_name=_('user'))
     emailuser_id = models.IntegerField()
@@ -198,7 +197,7 @@ class RegistrationProfile(models.Model):
         verbose_name_plural = _('registration profiles')
     
     def __unicode__(self):
-        return "Registration information for %s" % self.emailuser_id
+        return u"Registration information for %s" % self.emailuser_id
     
     def activation_key_expired(self):
         """
@@ -282,14 +281,8 @@ class RegistrationProfile(models.Model):
         subject = ''.join(subject.splitlines())
         try:
             user = User.objects.get(id=self.emailuser_id)
-
-            send_to = user.username
-            profile = Profile.objects.get_profile_by_user(user.username)
-            if profile and profile.contact_email:
-                send_to = profile.contact_email
-
             send_html_email(subject, 'registration/activation_email.html',
-                            ctx_dict, None, [send_to])
+                            ctx_dict, None, [user.username])
         except User.DoesNotExist:
             pass
 
@@ -297,9 +290,9 @@ class RegistrationProfile(models.Model):
 ########## signal handlers
 import logging
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.dispatch import receiver
-from urllib.parse import quote
+from django.utils.http import urlquote
 
 from registration.signals import user_registered
 from seahub.utils import get_site_scheme_and_netloc
@@ -312,9 +305,9 @@ logger = logging.getLogger(__name__)
 def notify_admins_on_activate_request(reg_email):
     ctx_dict = {
         "site_name": settings.SITE_NAME,
-        "user_search_link": "%s%s?query=%s" % (
-            get_site_scheme_and_netloc(), reverse("sys_search_users"),
-            quote(reg_email)),
+        "user_search_link": "%s%s?email=%s" % (
+            get_site_scheme_and_netloc(), reverse("user_search"),
+            urlquote(reg_email)),
     }
 
     subject = render_to_string('registration/activate_request_email_subject.txt',
@@ -335,9 +328,9 @@ def notify_admins_on_activate_request(reg_email):
 def notify_admins_on_register_complete(reg_email):
     ctx_dict = {
         "site_name": settings.SITE_NAME,
-        "user_search_link": "%s%s?query=%s" % (
-            get_site_scheme_and_netloc(), reverse("sys_search_users"),
-            quote(reg_email)),
+        "user_search_link": "%s%s?email=%s" % (
+            get_site_scheme_and_netloc(), reverse("user_search"),
+            urlquote(reg_email)),
         "reg_email": reg_email,
     }
 

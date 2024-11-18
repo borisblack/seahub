@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% load avatar_tags i18n %}
+
+{% block sub_title %}{% trans "Settings" %} - {% endblock %}
+
+{% block main_class %}d-flex ovhd{% endblock %}
+
+{% block main_content %}
+<div class="row flex-1 d-flex">
+
+<div class="side-nav side-textnav col-md-3" id="side-nav" role="navigation">
+    <a href="#" title="{% trans "Close" %}" aria-label="{% trans "Close" %}" class="sf2-icon-x1 sf-popover-close op-icon hidden-md-up js-close-side-nav fright"></a>
+    <ul class="side-textnav-tabs">
+        <li class="tab"><a href="#user-basic-info">{% trans "Profile" %}</a></li>
+
+        {% if not is_ldap_user and ENABLE_CHANGE_PASSWORD %}
+        <li class="tab"><a href="#update-user-passwd">{% trans "Password" %}</a></li>
+        {% endif %}
+
+        <li class="tab"><a href="#lang-setting">{% trans "Language" %}</a></li>
+
+        {% if two_factor_auth_enabled %}
+        <li class="tab"><a href="#two-factor-auth">{% trans "Two-Factor Authentication" %}</a></li>
+        {% endif %}
+
+        <li class="tab" id="del-account-nav"><a href="#del-account">{% trans "Delete Account" %}</a></li>
+    </ul>
+</div>
+
+<div id="right-panel" class="col-md-9 ov-auto flex-1">
+
+<h2>{% trans "Settings" %}</h2>
+
+<div id="user-basic-info" class="setting-item">
+    <h3>{% trans "Profile Setting" %}</h3>
+    <div id="user-avatar-change">
+        <label>{% trans "Avatar:" %}</label>{% avatar request.user.username 80 %}
+        <form id="user-avatar-form" enctype="multipart/form-data" method="post" action="{% url 'avatar_add' %}">{% csrf_token %}
+            <button type="button" id="user-avatar-chg-btn">{% trans "Change" %}</button>
+            <input type="file" name="avatar" id="user-avatar-input" class="hide" />
+        </form>
+    </div>
+
+    <form action="" method="post">{% csrf_token %}
+        <label>{% trans "Name:" context "true name" %}</label><input type="text" name="nickname" value="{{ form.data.nickname }}" class="input" />
+        {% for error in form.nickname.errors %}
+        <span class="error">{{ error|escape }}</span>
+        {% endfor %}
+        <br/>
+
+        {% if form.data.login_id %}
+        <label>{% trans "Username:" %}</label><input type="text" name="username" value="{{form.data.login_id}}" class="input" disabled />
+        <span>{% trans "You can use this field at login." %}</span>
+        <br/>
+        {% endif %}
+
+        {% if form.data.contact_email %}
+        <label>{% trans "Contact Email:" %}</label><input type="text" name="contact_email" value="{{form.data.contact_email}}" class="input" disabled />
+        <span>{% trans "Your notifications will be sent to this email." %}</span>
+        <br/>
+        {% endif %}
+
+        {% if form.telephone %}
+        <label>{% trans "Telephone:" %}</label><input type="text" name="telephone" value="{{ form.data.telephone }}" class="input" />
+        {% for error in form.telephone.errors %}
+        <span class="error">{{ error|escape }}</span>
+        {% endfor %}
+        <br/>
+        {% endif %}
+
+        <input type="submit" value="{% trans "Submit" %}" class="submit vh" />
+    </form>
+</div>
+
+{% if not is_ldap_user and ENABLE_CHANGE_PASSWORD %}
+<div id="update-user-passwd" class="setting-item">
+    <h3>{% trans "Password" %}</h3>
+    <a href="{{ SITE_ROOT }}accounts/password/change/">{% trans "Update" %}</a>
+</div>
+{% endif %}
+
+{% if ENABLE_ADDRESSBOOK_OPT_IN %}
+<div class="setting-item" id="list-in-address-book">
+    <h3>{% trans "Global Address Book" %}</h3>
+    <form id="list-in-address-book-form" method="post" action="">{% csrf_token %}
+        {% if form.data.list_in_address_book %}
+        <input type="checkbox" name="list_in_address_book" checked="checked">
+        {% else %}
+        <input type="checkbox" name="list_in_address_book">
+        {% endif %}
+        <label for="list_in_address_book">{% trans "List your account in global address book, so that others can find you by typing your name." %}</label>
+    </form>
+</div>
+{% endif %}
+
+<div class="setting-item" id="lang-setting">
+    <h3>{% trans "Language Setting" %}</h3>
+    <a href="#" id="lang-context" data-lang="{{ LANGUAGE_CODE }}">{{ LANGUAGE_CODE|language_name_local|capfirst }} <span class="icon-caret-down"></span></a>
+    <div id="lang-context-selector" class="sf-popover hide" >
+        <ul class="sf-popover-con">
+            {% for LANG in LANGUAGES %}
+            <li><a href="{% url 'i18n' %}?lang={{ LANG.0 }}">{{ LANG.1 }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+{% if two_factor_auth_enabled %}
+<div class="setting-item" id="two-factor-auth">
+    <h3>{% trans "Two-Factor Authentication" %}</h3>
+    {% if default_device %}
+    <p class="txt-before-btn">{% trans "Status" %}: {% trans "enabled" %}</p>
+    <p><a class="sf-btn-link" href="{% url 'two_factor:disable' %}">
+        {% trans "Disable Two-Factor Authentication" %}</a>
+    </p>
+
+    <p class="txt-before-btn">
+      {% blocktrans %}If you don't have any device with you, you can access your account using backup codes.{% endblocktrans %}
+      {% blocktrans count counter=backup_tokens %}You have only one backup code remaining.{% plural %}You have {{ counter }} backup codes remaining.{% endblocktrans %}
+    </p>
+    <p><a href="{% url 'two_factor:backup_tokens' %}"
+          class="sf-btn-link">{% trans "Show Codes" %}</a></p>
+
+    {% else %}
+
+    <p class="txt-before-btn">{% blocktrans %}Two-factor authentication is not enabled for your account. Enable two-factor authentication for enhanced account security.{% endblocktrans %}</p>
+    <p><a href="{% url 'two_factor:setup' %}" class="sf-btn-link">
+      {% trans "Enable Two-Factor Authentication" %}</a>
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="setting-item" id="del-account">
+    <h3>{% trans "Delete Account" %}</h3>
+    <p class="txt-before-btn">{% trans "This operation will not be reverted. Please think twice!" %}</p>
+    <button type="button" id="account-delete-btn">{% trans "Delete" %}</button>
+    <form id="account-delete-form" class="hide" method="post" action="{% url 'delete_user_account' %}">{% csrf_token %}
+        <input type="submit" value="{% trans "Delete" %}" class="submit" />
+    </form>
+</div>
+
+</div> <!-- right-panel -->
+</div> <!-- row -->
+
+{% endblock %}
+
+{% block extra_script %}
+<script type="text/javascript">
+// change avatar
+$('#user-avatar-chg-btn').on('click', function() {
+    $('#user-avatar-input').trigger('click');
+});
+$('#user-avatar-input').on('change', function() {
+    // check file extension
+    var file, filename, ext;
+    var allow = false;
+    var allowed_ext = ['jpg','jpeg', 'png', 'gif'];
+    if (this.files) { // IE: version lower than 10 doesn't have 'files'
+        file = this.files[0];
+        filename = file.name || file.fileName;
+    } else {
+        filename = this.value;
+    }
+    if (filename.lastIndexOf('.') != -1) { // ext exists
+        ext = filename.substr((filename.lastIndexOf('.') + 1)).toLowerCase();
+    }
+    if (ext) {
+        for (var i = 0, len = allowed_ext.length; i < len; i++) {
+            if (ext == allowed_ext[i]) {
+                allow = true;
+                break;
+            }
+        }
+    } else {
+        feedback(filename + "{% trans " is not supported. Please choose an image file." %}", 'error');
+        return false;
+    }
+
+    if (!allow) {
+        var err_msg = filename + "{% trans " is not supported. File extensions can only be " %}" + allowed_ext.join(', ');
+        feedback(err_msg, 'error');
+        return false;
+    }
+
+    // check if file size is less than 1MB
+    if (file && file.size > 1024*1024) {
+        feedback(filename + "{% trans " is too large. Allowed maximum size is 1MB." %}", 'error');
+        return false;
+    }
+
+    $('#user-avatar-form').trigger('submit');
+});
+
+$('#user-basic-info .submit').css({'margin-left': $('#user-basic-info label').outerWidth(true)}).removeClass('vh');
+
+$('#account-delete-btn').on('click', function () {
+    var title = "{% trans "Delete Account" %}",
+        con = "{% trans "Really want to delete your account?" %}";
+
+    $('#confirm-con').html('<h3 id="dialogTitle">' + title + '</h3><p>' + con + '</p>');
+    $('#confirm-popup').modal({appendTo:'#main'});
+    $('#simplemodal-container').css({'height':'auto'});
+
+    $('#confirm-yes').on('click', function() {
+        $('#account-delete-form').trigger('submit');
+    });
+});
+
+{% if ENABLE_ADDRESSBOOK_OPT_IN %}
+$("#list-in-address-book input[type='checkbox']").on('change', function() {
+    var _this = $(this), data = {};
+
+    if (_this.prop('checked')) {
+        data['list_in_address_book'] = 'true';
+    } else {
+        data['list_in_address_book'] = 'false';
+    }
+
+    $.ajax({
+        url: "{% url 'api-v2.1-user' %}",
+        type: 'PUT',
+        dataType: 'json',
+        cache: false,
+        beforeSend: prepareCSRFToken,
+        data: data,
+        success: function(data) {
+            _this.attr('checked', data['list_in_address_book']);
+            feedback("{% trans "Success" %}", 'success');
+        },
+        error: ajaxErrorHandler
+    });
+});
+{% endif %}
+
+(function() {
+    var lang_context = $('#lang-context'),
+        lang_selector = $('#lang-context-selector');
+
+    lang_context.parent().css({'position':'relative'});
+    lang_selector.css({'top': lang_context.position().top + lang_context.height() + 3});
+
+    lang_context.on('click', function() {
+        lang_selector.toggleClass('hide');
+        return false;
+    }).on('focus', function() { $(this).trigger('blur'); });
+
+    $(document).on('click', function(e) {
+        var element = e.target || e.srcElement;
+        if (element.id != 'lang-context-selector' && element.id != 'lang-context') {
+            lang_selector.addClass('hide');
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,103 +1,18 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # -*- coding: utf-8 -*-
-import stat
 import logging
-from collections import namedtuple
 
 import seaserv
 from seaserv import seafile_api, ccnet_api
 
-from seahub.constants import (
-    PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT, PERMISSION_INVISIBLE,
-    PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN,
-    REPO_STATUS_NORMAL, REPO_STATUS_READ_ONLY, CUSTOM_PERMISSION_PREFIX
-)
 from seahub.utils import EMPTY_SHA1, is_org_context, is_pro_version
-from seahub.api2.utils import to_python_boolean
 from seahub.base.models import RepoSecretKey
 from seahub.base.templatetags.seahub_tags import email2nickname
-from seahub.share.models import CustomSharePermissions
 
-from seahub.settings import ENABLE_STORAGE_CLASSES, STORAGE_CLASS_MAPPING_POLICY
+from seahub.settings import ENABLE_STORAGE_CLASSES, \
+        STORAGE_CLASS_MAPPING_POLICY, ENABLE_FOLDER_PERM
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_repo_status_code(status):
-    if status == 0:
-        return REPO_STATUS_NORMAL
-    elif status == 1:
-        return REPO_STATUS_READ_ONLY
-    else:
-        return ''
-
-
-def normalize_repo_status_str(status):
-    if status == 'normal':
-        return 0
-    elif status == 'read-only':
-        return 1
-    else:
-        return ''
-
-
-def get_available_repo_perms():
-    perms = [PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN]
-    if is_pro_version():
-        perms += [PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT, PERMISSION_INVISIBLE]
-
-    return perms
-
-
-def parse_repo_perm(perm):
-    RP = namedtuple('RepoPerm', [
-        'can_download', 'can_upload',  # download/upload files/folders
-        'can_edit_on_web',             # edit files on web
-        'can_delete',                  # delete files/folders
-        'can_copy',                    # copy files/folders on web
-        'can_preview',                 # preview files on web
-        'can_generate_share_link',     # generate share link
-    ])
-
-    if perm not in get_available_repo_perms():
-        try:
-            if CUSTOM_PERMISSION_PREFIX in perm:
-                perm = perm.split('-')[1]
-            custom_perm_obj = CustomSharePermissions.objects.get(id=int(perm)).to_dict()
-            RP.can_download = to_python_boolean(str(custom_perm_obj['permission'].get('download', False)))
-            RP.can_upload = to_python_boolean(str(custom_perm_obj['permission'].get('upload', False)))
-            RP.can_edit_on_web = to_python_boolean(str(custom_perm_obj['permission'].get('modify', False)))
-            RP.can_copy = to_python_boolean(str(custom_perm_obj['permission'].get('copy', False)))
-            RP.can_delete = to_python_boolean(str(custom_perm_obj['permission'].get('delete', False)))
-            RP.can_preview = to_python_boolean(str(custom_perm_obj['permission'].get('preview', False)))
-            RP.can_generate_share_link = to_python_boolean(
-                str(custom_perm_obj['permission'].get('download_external_link', False)))
-            return RP
-        except Exception as e:
-            logger.warning(e)
-
-    RP.can_download = True if perm in [
-        PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN] else False
-    RP.can_upload = True if perm in [
-        PERMISSION_READ_WRITE, PERMISSION_ADMIN, PERMISSION_PREVIEW_EDIT] else False
-    RP.can_edit_on_web = True if perm in [
-        PERMISSION_READ_WRITE, PERMISSION_ADMIN, PERMISSION_PREVIEW_EDIT
-    ] else False
-    RP.can_copy = True if perm in [
-        PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN, PERMISSION_PREVIEW_EDIT
-    ] else False
-    RP.can_delete = True if perm in [
-        PERMISSION_READ_WRITE, PERMISSION_ADMIN, PERMISSION_PREVIEW_EDIT
-    ] else False
-    RP.can_preview = True if perm in [
-        PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN,
-        PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT
-    ] else False
-    RP.can_generate_share_link = True if perm in [
-        PERMISSION_READ_WRITE, PERMISSION_READ, PERMISSION_ADMIN,
-        PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT
-    ] else False
-    return RP
 
 def list_dir_by_path(cmmt, path):
     if cmmt.root_id == EMPTY_SHA1:
@@ -121,15 +36,9 @@ def get_sub_repo_abbrev_origin_path(repo_name, origin_path):
 
 def get_repo_owner(request, repo_id):
     if is_org_context(request):
-        repo_owner = seafile_api.get_org_repo_owner(repo_id)
+        return seafile_api.get_org_repo_owner(repo_id)
     else:
-        # for admin panel
-        # administrator may get org repo's owner
-        repo_owner = seafile_api.get_repo_owner(repo_id)
-        if not repo_owner:
-            repo_owner = seafile_api.get_org_repo_owner(repo_id)
-
-    return repo_owner
+        return seafile_api.get_repo_owner(repo_id)
 
 def is_repo_owner(request, repo_id, username):
     return username == get_repo_owner(request, repo_id)
@@ -236,32 +145,8 @@ def get_locked_files_by_dir(request, repo_id, folder_path):
 
     return locked_files
 
-def get_sub_folder_permission_by_dir(request, repo_id, parent_dir):
-    """ Get sub folder permission in a folder
-
-    Returns:
-        A dict contains folder name and permission.
-
-        folder_permission_dict = {
-            'folder_name_1': 'r';
-            'folder_name_2': 'rw';
-            ...
-        }
-    """
-    username = request.user.username
-    dir_id = seafile_api.get_dir_id_by_path(repo_id, parent_dir)
-    dirents = seafile_api.list_dir_with_perm(repo_id,
-            parent_dir, dir_id, username, -1, -1)
-
-    folder_permission_dict = {}
-    for dirent in dirents:
-        if stat.S_ISDIR(dirent.mode):
-            folder_permission_dict[dirent.obj_name] = dirent.permission
-
-    return folder_permission_dict
-
 def get_shared_groups_by_repo(repo_id, org_id=None):
-    if not org_id or org_id < 0:
+    if not org_id:
         group_ids = seafile_api.get_shared_group_ids_by_repo(
                 repo_id)
     else:
@@ -289,17 +174,21 @@ def get_related_users_by_repo(repo_id, org_id=None):
 
     users = []
 
-    # 1. users repo has been shared to
-    if org_id and org_id > 0:
-        users.extend(seafile_api.org_get_shared_users_by_repo(org_id, repo_id))
-        owner = seafile_api.get_org_repo_owner(repo_id)
+    if org_id:
+        repo_owner = seafile_api.get_org_repo_owner(repo_id)
+        user_shared_to = seafile_api.list_org_repo_shared_to(org_id,
+                repo_owner, repo_id)
     else:
-        users.extend(seafile_api.get_shared_users_by_repo(repo_id))
-        owner = seafile_api.get_repo_owner(repo_id)
+        repo_owner = seafile_api.get_repo_owner(repo_id)
+        user_shared_to = seafile_api.list_repo_shared_to(
+                repo_owner, repo_id)
 
-    # 2. repo owner
-    if owner not in users:
-        users.append(owner)
+    # 1. repo owner
+    users.append(repo_owner)
+
+    # 2. users repo has been shared to
+    for user in user_shared_to:
+        users.append(user.user)
 
     # 3. members of groups repo has been shared to
     groups = get_shared_groups_by_repo(repo_id, org_id)
@@ -317,9 +206,12 @@ def is_valid_repo_id_format(repo_id):
 
 def can_set_folder_perm_by_user(username, repo, repo_owner):
     """ user can get/update/add/delete folder perm feature must comply with the following
+            setting: ENABLE_FOLDER_PERM
             repo:repo is not virtual
             permission: is admin or repo owner.
     """
+    if not ENABLE_FOLDER_PERM:
+        return False
     if repo.is_virtual:
         return False
     is_admin = is_repo_admin(username, repo.id)
@@ -337,42 +229,16 @@ def add_encrypted_repo_secret_key_to_database(repo_id, password):
         logger.error(e)
 
 
-def is_group_repo_staff(request, repo_id, username):
+def is_group_repo_staff(repo_id, username):
     is_staff = False
 
-    repo_owner = get_repo_owner(request, repo_id)
+    group_repo_owner = seafile_api.get_repo_owner(repo_id)
 
-    if '@seafile_group' in repo_owner:
-        group_id = email2nickname(repo_owner)
+    if '@seafile_group' in group_repo_owner:
+        group_id = email2nickname(group_repo_owner)
         is_staff = seaserv.check_group_staff(group_id, username)
 
     return is_staff
-
-def repo_has_been_shared_out(request, repo_id):
-
-    has_been_shared_out = False
-    username = request.user.username
-
-    if is_org_context(request):
-        org_id = request.user.org.org_id
-
-        is_inner_org_pub_repo = False
-        # check if current repo is pub-repo
-        org_pub_repos = seafile_api.list_org_inner_pub_repos_by_owner(
-                org_id, username)
-        for org_pub_repo in org_pub_repos:
-            if repo_id == org_pub_repo.id:
-                is_inner_org_pub_repo = True
-                break
-
-        if seafile_api.org_repo_has_been_shared(repo_id, including_groups=True) or is_inner_org_pub_repo:
-            has_been_shared_out = True
-    else:
-        if seafile_api.repo_has_been_shared(repo_id, including_groups=True) or \
-                (not request.cloud_mode and seafile_api.is_inner_pub_repo(repo_id)):
-            has_been_shared_out = True
-
-    return has_been_shared_out
 
 # TODO
 from seahub.share.utils import is_repo_admin

@@ -3,13 +3,13 @@
 from django import forms
 from django.db import models
 from django.forms import ModelForm
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 from django.core.exceptions import MultipleObjectsReturned
 
 from seaserv import ccnet_threaded_rpc
 
 from seahub.base.fields import LowerCaseCharField
-from .settings import CONTACT_EMAIL_LENGTH
+from settings import CONTACT_EMAIL_LENGTH
 
 class ContactManager(models.Manager):
     def add_contact(self, user_email, contact_email, contact_name=None, note=None):

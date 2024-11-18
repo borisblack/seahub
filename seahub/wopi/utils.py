@@ -2,9 +2,8 @@
 import os
 import re
 import time
-import urllib.request
-import urllib.parse
-import urllib.error
+import urllib
+import urlparse
 import requests
 import hashlib
 import logging
@@ -19,7 +18,7 @@ except ImportError:
 from seaserv import seafile_api
 
 from django.core.cache import cache
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 
 from seahub.utils import get_site_scheme_and_netloc
 from .settings import OFFICE_WEB_APP_BASE_URL, WOPI_ACCESS_TOKEN_EXPIRATION, \
@@ -38,7 +37,6 @@ def generate_access_token_cache_key(token):
 
     return 'wopi_access_token_' + str(token)
 
-
 def get_file_info_by_token(token):
     """ Get file info from cache by access token
 
@@ -46,13 +44,7 @@ def get_file_info_by_token(token):
     """
 
     key = generate_access_token_cache_key(token)
-    value = cache.get(key)
-    if not value:
-        logger.info('No wopi cache value when first get %s' % key)
-        value = cache.get(key)
-
-    return value if value else None
-
+    return cache.get(key) if cache.get(key) else {}
 
 def generate_discovery_cache_key(name, ext):
     """ Generate cache key for office web app hosting discovery
@@ -63,10 +55,9 @@ def generate_discovery_cache_key(name, ext):
 
     return 'wopi_' + name + '_' + ext
 
-
 def get_wopi_dict(request_user, repo_id, file_path,
-                  action_name='view', can_download=True,
-                  language_code='en', obj_id=''):
+        action_name='view', can_download=True,
+        language_code='en', obj_id=''):
     """ Prepare dict data for WOPI host page
     """
 
@@ -87,14 +78,6 @@ def get_wopi_dict(request_user, repo_id, file_path,
             file_ext = 'xlsx'
 
     wopi_key = generate_discovery_cache_key(action_name, file_ext)
-
-    if OFFICE_SERVER_TYPE.lower() == 'collaboraoffice':
-        # Since the hosting discover page of Collabora Online does not provide
-        # a URL with the action set to "view" for some common file formats,
-        # we always use "edit" here.
-        # Preview file is achieved by setting `UserCanWrite` to `False` in `CheckFileInfo`.
-        wopi_key = generate_discovery_cache_key('edit', file_ext)
-
     action_url = cache.get(wopi_key)
 
     if not action_url:
@@ -103,13 +86,12 @@ def get_wopi_dict(request_user, repo_id, file_path,
         try:
             if OFFICE_WEB_APP_CLIENT_CERT and OFFICE_WEB_APP_CLIENT_KEY:
                 xml = requests.get(OFFICE_WEB_APP_BASE_URL,
-                                   cert=(OFFICE_WEB_APP_CLIENT_CERT,
-                                         OFFICE_WEB_APP_CLIENT_KEY),
-                                   verify=OFFICE_WEB_APP_SERVER_CA)
+                    cert=(OFFICE_WEB_APP_CLIENT_CERT, OFFICE_WEB_APP_CLIENT_KEY),
+                    verify=OFFICE_WEB_APP_SERVER_CA)
             elif OFFICE_WEB_APP_CLIENT_PEM:
                 xml = requests.get(OFFICE_WEB_APP_BASE_URL,
-                                   cert=OFFICE_WEB_APP_CLIENT_PEM,
-                                   verify=OFFICE_WEB_APP_SERVER_CA)
+                    cert=OFFICE_WEB_APP_CLIENT_PEM,
+                    verify=OFFICE_WEB_APP_SERVER_CA)
             else:
                 xml = requests.get(OFFICE_WEB_APP_BASE_URL, verify=OFFICE_WEB_APP_SERVER_CA)
         except Exception as e:
@@ -122,7 +104,7 @@ def get_wopi_dict(request_user, repo_id, file_path,
             logger.error(e)
             return None
 
-        for action in root.iter('action'):
+        for action in root.getiterator('action'):
             attr = action.attrib
             ext = attr.get('ext')
             name = attr.get('name')
@@ -133,7 +115,7 @@ def get_wopi_dict(request_user, repo_id, file_path,
                 tmp_action_url = re.sub(r'<.*>', '', urlsrc)
                 tmp_wopi_key = generate_discovery_cache_key(name, ext)
                 cache.set(tmp_wopi_key, tmp_action_url,
-                          OFFICE_WEB_APP_DISCOVERY_EXPIRATION)
+                        OFFICE_WEB_APP_DISCOVERY_EXPIRATION)
 
                 if wopi_key == tmp_wopi_key:
                     action_url = tmp_action_url
@@ -156,15 +138,15 @@ def get_wopi_dict(request_user, repo_id, file_path,
     fake_file_id = hashlib.sha1(repo_path_info.encode('utf8')).hexdigest()
     base_url = get_site_scheme_and_netloc()
     check_file_info_endpoint = reverse('WOPIFilesView', args=[fake_file_id])
-    WOPISrc = urllib.parse.urljoin(base_url, check_file_info_endpoint)
+    WOPISrc = urlparse.urljoin(base_url, check_file_info_endpoint)
 
     query_dict = {'WOPISrc': WOPISrc}
     if action_url[-1] in ('?', '&'):
-        full_action_url = action_url + urllib.parse.urlencode(query_dict)
+        full_action_url = action_url + urllib.urlencode(query_dict)
     elif '?' in action_url:
-        full_action_url = action_url + '&' + urllib.parse.urlencode(query_dict)
+        full_action_url = action_url + '&' + urllib.urlencode(query_dict)
     else:
-        full_action_url = action_url + '?' + urllib.parse.urlencode(query_dict)
+        full_action_url = action_url + '?' + urllib.urlencode(query_dict)
 
     # key, collected from seahub/settings.py
     # value, collected from https://wopi.readthedocs.io/en/latest/faq/languages.html#languages
@@ -202,8 +184,7 @@ def get_wopi_dict(request_user, repo_id, file_path,
     }
     WOPI_UI_LLCC = lang_dict[language_code]
 
-    # `lang` parameter is used for Collabora Office
-    full_action_url += f'&ui={WOPI_UI_LLCC}&rs={WOPI_UI_LLCC}&lang={WOPI_UI_LLCC}'
+    full_action_url += '&ui=%s&rs=%s' % (WOPI_UI_LLCC, WOPI_UI_LLCC)
 
     # generate access token
     user_repo_path_info = {

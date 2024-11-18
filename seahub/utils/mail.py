@@ -1,23 +1,27 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import os
-import logging
-from django.template import loader
-from django.core.mail import EmailMessage
+from django.template import Context, loader
+from post_office import mail
+from post_office.models import PRIORITY
+from constance import config
 
 from seahub.utils import get_site_scheme_and_netloc, get_site_name
 from seahub.settings import MEDIA_URL, LOGO_PATH, \
         MEDIA_ROOT, CUSTOM_LOGO_PATH
 
-logger = logging.getLogger(__name__)
+MAIL_PRIORITY = PRIORITY        # 'low medium high now'
 
-
-def send_html_email_with_dj_template(recipients, subject, dj_template, context={}):
+def send_html_email_with_dj_template(recipients, subject, dj_template,
+                                     context={}, sender=None, template=None,
+                                     message='', headers=None,
+                                     priority=None, backend=''):
     """
 
     Arguments:
     - `recipients`:
     - `subject`:
-    - `dj_template`:
+    - `sender`:
+    - `template`:
     - `context`:
 
     """
@@ -38,12 +42,7 @@ def send_html_email_with_dj_template(recipients, subject, dj_template, context={
     t = loader.get_template(dj_template)
     html_message = t.render(context)
 
-    mail = EmailMessage(subject=subject, body=html_message, to=[recipients])
-    mail.content_subtype = "html"
-
-    try:
-        mail.send()
-        return True
-    except Exception as e:
-        logger.error(e)
-        return False
+    mail.send(recipients, sender=sender, template=template, context=context,
+              subject=subject, message=message,
+              html_message=html_message, headers=headers, priority=priority,
+              backend=backend)

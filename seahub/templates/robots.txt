@@ -1,4 +1,2 @@
 User-agent: *
-Allow: /published/
-Allow: /media/
 Disallow: /

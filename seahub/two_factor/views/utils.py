@@ -4,13 +4,19 @@ import logging
 from constance import config
 from django.core.exceptions import ValidationError
 from django.utils.decorators import method_decorator
-from django.utils.translation import gettext as _
-from django.urls import reverse
+from django.utils.translation import ugettext as _
+from django.core.urlresolvers import reverse
 from django.http import HttpResponseRedirect
 
-from formtools.wizard.forms import ManagementForm
-from formtools.wizard.views import SessionWizardView
-from formtools.wizard.storage.session import SessionStorage
+try:
+    from formtools.wizard.forms import ManagementForm
+    from formtools.wizard.views import SessionWizardView
+    from formtools.wizard.storage.session import SessionStorage
+except ImportError:
+    # pylint: disable=import-error,no-name-in-module
+    from django.contrib.formtools.wizard.forms import ManagementForm
+    from django.contrib.formtools.wizard.views import SessionWizardView
+    from django.contrib.formtools.wizard.storage.session import SessionStorage
 
 
 logger = logging.getLogger(__name__)

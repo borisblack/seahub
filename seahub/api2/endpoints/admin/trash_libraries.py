@@ -16,10 +16,10 @@ from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
-from seahub.base.templatetags.seahub_tags import email2nickname
 from seahub.group.utils import group_id_to_name
 
 from seahub.api2.endpoints.group_owned_libraries import get_group_id_by_repo_owner
+from seahub.signals import repo_restored
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ def get_trash_repo_info(repo):
     result['name'] = repo.repo_name
     result['id'] = repo.repo_id
     result['owner'] = owner
-    result['owner_name'] = email2nickname(owner)
     result['delete_time'] = timestamp_to_isoformat_timestr(repo.del_time)
 
     if '@seafile_group' in owner:
@@ -54,9 +53,6 @@ class AdminTrashLibraries(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # list by owner
         search_owner = request.GET.get('owner', '')
@@ -105,15 +101,13 @@ class AdminTrashLibraries(APIView):
 
         return Response({"page_info": page_info, "repos": return_results})
 
+
     def delete(self, request, format=None):
         """ clean all deleted libraries(by owner)
 
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         owner = request.data.get('owner', '')
         try:
@@ -145,15 +139,13 @@ class AdminTrashLibrary(APIView):
         1. only admin can perform this action.
         """
 
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         if not seafile_api.get_trash_repo_owner(repo_id):
             error_msg = "Library does not exist in trash."
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         try:
             seafile_api.restore_repo_from_trash(repo_id)
+            repo_restored.send(sender=None, repo_id=repo_id, operator=request.user.username)
         except SearpcError as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -167,9 +159,6 @@ class AdminTrashLibrary(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             seafile_api.del_repo_from_trash(repo_id)

@@ -1,7 +1,7 @@
 # encoding: utf-8
 import os
 
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from django.test import TestCase
 import requests
 
@@ -13,7 +13,7 @@ class ViewSharedFileTest(TestCase, Fixtures):
 
     def setUp(self):
         share_file_info = {
-            'username': self.user.username,
+            'username': self.user,
             'repo_id': self.repo.id,
             'path': self.file,
             'password': None,
@@ -34,14 +34,17 @@ class ViewSharedFileTest(TestCase, Fixtures):
     def test_can_render(self):
         resp = self.client.get(reverse('view_shared_file', args=[self.fs.token]))
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'shared_file_view_react.html')
+        self.assertTemplateUsed(resp, 'shared_file_view.html')
+
         self.assertContains(resp, os.path.basename(self.file))
+        dl_url_tag = 'href="?dl=1"'
+        self.assertContains(resp, dl_url_tag)
 
     def test_can_download(self):
         dl_url = reverse('view_shared_file', args=[self.fs.token]) + '?dl=1'
         resp = self.client.get(dl_url)
         self.assertEqual(302, resp.status_code)
-        assert '8082/f/' in resp.get('location')
+        assert '8082/files/' in resp.get('location')
 
     def test_can_not_download_viewonly(self):
         assert self.fs.get_permissions()['can_download'] is True
@@ -51,6 +54,18 @@ class ViewSharedFileTest(TestCase, Fixtures):
         dl_url = reverse('view_shared_file', args=[self.fs.token]) + '?dl=1'
         resp = self.client.get(dl_url)
         self.assertEqual(404, resp.status_code)
+
+    def test_dl_link_can_use_more_times(self):
+        dl_url = reverse('view_shared_file', args=[self.fs.token]) + '?dl=1'
+        resp = self.client.get(dl_url)
+        self.assertEqual(302, resp.status_code)
+
+        dl_link = resp.get('location')
+        res = requests.get(dl_link)
+        self.assertEqual(200, res.status_code)
+
+        res = requests.get(dl_link)
+        self.assertEqual(200, res.status_code)
 
     def test_can_view_raw(self):
         dl_url = reverse('view_shared_file', args=[self.fs.token]) + '?raw=1'
@@ -119,13 +134,15 @@ class ViewSharedFileTest(TestCase, Fixtures):
             'password': '12345678',
         })
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'shared_file_view_react.html')
+        self.assertTemplateUsed(resp, 'shared_file_view.html')
         self.assertContains(resp, os.path.basename(self.file))
+        dl_url_tag = 'href="?dl=1"'
+        self.assertContains(resp, dl_url_tag)
 
     def _assert_render_file_page_without_passwd(self, fs):
         resp = self.client.get(reverse('view_shared_file', args=[fs.token]))
         self.assertEqual(200, resp.status_code)
-        self.assertTemplateUsed(resp, 'shared_file_view_react.html')
+        self.assertTemplateUsed(resp, 'shared_file_view.html')
 
     def test_can_view_enc(self):
         self._assert_redirect_to_password_page(self.enc_fs)

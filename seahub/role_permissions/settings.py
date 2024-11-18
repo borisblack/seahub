@@ -1,5 +1,4 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
-from copy import deepcopy
 import logging
 
 from django.conf import settings
@@ -9,25 +8,9 @@ from seahub.constants import DEFAULT_USER, GUEST_USER, \
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
-
-def merge_roles(default, custom):
-    """Merge custom dict into the copy of default dict, and return the copy."""
-    copy = deepcopy(default)
-    for key in custom:
-        if key in default:
-            copy[key].update(custom[key])
-        else:
-            default_copy = default['default'].copy()
-            default_copy.update(custom[key])
-            copy[key] = default_copy
-
-    return copy
-
-
 DEFAULT_ENABLED_ROLE_PERMISSIONS = {
     DEFAULT_USER: {
         'can_add_repo': True,
-        'can_share_repo': True,
         'can_add_group': True,
         'can_view_org': True,
         'can_add_public_repo': False,
@@ -43,13 +26,9 @@ DEFAULT_ENABLED_ROLE_PERMISSIONS = {
         'can_export_files_via_mobile_client': True,
         'storage_ids': [],
         'role_quota': '',
-        'can_publish_repo': True,
-        'upload_rate_limit': 0,
-        'download_rate_limit': 0,
     },
     GUEST_USER: {
         'can_add_repo': False,
-        'can_share_repo': False,
         'can_add_group': False,
         'can_view_org': False,
         'can_add_public_repo': False,
@@ -65,21 +44,35 @@ DEFAULT_ENABLED_ROLE_PERMISSIONS = {
         'can_export_files_via_mobile_client': False,
         'storage_ids': [],
         'role_quota': '',
-        'can_publish_repo': False,
-        'upload_rate_limit': 0,
-        'download_rate_limit': 0,
     },
 }
 
+role_permissions = DEFAULT_ENABLED_ROLE_PERMISSIONS.copy()
+
 try:
-    custom_role_permissions = settings.ENABLED_ROLE_PERMISSIONS
+    role_permissions.update(settings.ENABLED_ROLE_PERMISSIONS)  # merge outter dict
 except AttributeError:
-    custom_role_permissions = {}
+    pass  # ignore error if ENABLED_ROLE_PERMISSONS is not set in settings.py
 
-ENABLED_ROLE_PERMISSIONS = merge_roles(
-    DEFAULT_ENABLED_ROLE_PERMISSIONS, custom_role_permissions
-)
+def get_enabled_role_permissions():
+    permissions = {}
+    for role, perms in role_permissions.iteritems():
+        default_permissions = DEFAULT_ENABLED_ROLE_PERMISSIONS[DEFAULT_USER]
+        # check role permission syntax
+        for k in perms.keys():
+            if k not in default_permissions.keys():
+                logger.warn('"%s" is not valid permission, please review the ENABLED_ROLE_PERMISSIONS setting.' % k)
 
+        all_false_permission = {}
+        for permission in default_permissions.keys():
+            all_false_permission[permission] = False
+
+        all_false_permission.update(perms)
+        permissions[role] = all_false_permission
+
+    return permissions
+
+ENABLED_ROLE_PERMISSIONS = get_enabled_role_permissions()
 
 # role permission for administraror
 
@@ -96,11 +89,9 @@ DEFAULT_ENABLED_ADMIN_ROLE_PERMISSIONS = {
         'can_config_system': True,
         'can_manage_library': True,
         'can_manage_user': True,
-        'can_update_user': True,
         'can_manage_group': True,
         'can_view_user_log': True,
         'can_view_admin_log': True,
-        'other_permission': True,
     },
     # SYSTEM_ADMIN can ONLY view system-info(without upload licence), settings pages.
     SYSTEM_ADMIN: {
@@ -131,24 +122,22 @@ try:
 except AttributeError:
     pass  # ignore error if ENABLED_ADMIN_ROLE_PERMISSIONS is not set in settings.py
 
-
 def get_enabled_admin_role_permissions():
     permissions = {}
-    for role, perms in admin_role_permissions.items():
+    for role, perms in admin_role_permissions.iteritems():
         # check admin role permission syntax
         default_admin_permissions = DEFAULT_ENABLED_ADMIN_ROLE_PERMISSIONS[DEFAULT_ADMIN]
-        for k in list(perms.keys()):
-            if k not in list(default_admin_permissions.keys()):
+        for k in perms.keys():
+            if k not in default_admin_permissions.keys():
                 logger.warn('"%s" is not valid permission, please review the ENABLED_ADMIN_ROLE_PERMISSIONS setting.' % k)
 
         all_false_permission = {}
-        for permission in list(default_admin_permissions.keys()):
+        for permission in default_admin_permissions.keys():
             all_false_permission[permission] = False
 
         all_false_permission.update(perms)
         permissions[role] = all_false_permission
 
     return permissions
-
 
 ENABLED_ADMIN_ROLE_PERMISSIONS = get_enabled_admin_role_permissions()

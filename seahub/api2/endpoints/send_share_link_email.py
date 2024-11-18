@@ -7,31 +7,30 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
-from django.utils.translation import gettext as _
+from django.utils.translation import ugettext as _
 
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
-from seahub.utils import IS_EMAIL_CONFIGURED, \
+from seahub.utils import IS_EMAIL_CONFIGURED, is_valid_username, \
     is_valid_email, string2list, gen_shared_link, send_html_email, \
     get_site_name
 from seahub.share.models import FileShare
-from seahub.settings import ADD_REPLY_TO_HEADER
+from seahub.settings import REPLACE_FROM_EMAIL, ADD_REPLY_TO_HEADER
 from seahub.profile.models import Profile
 
 logger = logging.getLogger(__name__)
 
-
 class SendShareLinkView(APIView):
 
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    authentication_classes = (TokenAuthentication, SessionAuthentication )
     permission_classes = (IsAuthenticated,)
     throttle_classes = (UserRateThrottle, )
 
     def post(self, request):
 
         if not IS_EMAIL_CONFIGURED:
-            error_msg = _('Failed to send email, email service is not properly configured, please contact administrator.')
+            error_msg = _(u'Sending shared link failed. Email service is not properly configured, please contact administrator.')
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         # check args
@@ -81,8 +80,12 @@ class SendShareLinkView(APIView):
                 'email': username,
                 'to_email': to_email,
                 'extra_msg': extra_msg,
-                'password': link.get_password(),
             }
+
+            if REPLACE_FROM_EMAIL:
+                from_email = useremail
+            else:
+                from_email = None  # use default from email
 
             if ADD_REPLY_TO_HEADER:
                 reply_to = useremail
@@ -94,15 +97,15 @@ class SendShareLinkView(APIView):
             template = 'shared_link_email.html'
 
             if link.s_type == 'f':
-                c['file_shared_type'] = _("file")
-                title = _('A file is shared to you on %s') % get_site_name()
+                c['file_shared_type'] = _(u"file")
+                title = _(u'A file is shared to you on %s') % get_site_name()
             else:
-                c['file_shared_type'] = _("folder")
-                title = _('A folder is shared to you on %s') % get_site_name()
+                c['file_shared_type'] = _(u"directory")
+                title = _(u'A directory is shared to you on %s') % get_site_name()
 
             # send email
             try:
-                send_html_email(title, template, c, None, [to_email], reply_to=reply_to)
+                send_html_email(title, template, c, from_email, [to_email], reply_to=reply_to)
                 result['success'].append(to_email)
             except Exception as e:
                 logger.error(e)

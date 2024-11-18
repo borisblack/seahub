@@ -16,10 +16,8 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.profile.models import Profile
 from seahub.utils import is_org_context
 from seahub.base.templatetags.seahub_tags import email2nickname
-from seahub.share.models import CustomSharePermissions
 
 logger = logging.getLogger(__name__)
-
 
 class SharedFolders(APIView):
 
@@ -33,6 +31,7 @@ class SharedFolders(APIView):
         Permission checking:
         1. all authenticated user can perform this action.
         """
+
         shared_repos = []
         username = request.user.username
 
@@ -49,26 +48,11 @@ class SharedFolders(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        repo_id_list = []
-        for repo in shared_repos:
-
-            if repo.is_virtual:
-                continue
-
-            repo_id = repo.repo_id
-            repo_id_list.append(repo_id)
-
-        custom_permission_dict = {}
-        custom_permissions = CustomSharePermissions.objects.filter(repo_id__in=repo_id_list)
-        for custom_permission in custom_permissions:
-            custom_id = f'custom-{custom_permission.id}'
-            custom_permission_dict[custom_id] = custom_permission.name
-
         returned_result = []
-        shared_repos.sort(key=lambda x: x.repo_name)
+        shared_repos.sort(lambda x, y: cmp(x.repo_name, y.repo_name))
         for repo in shared_repos:
             if not repo.is_virtual:
-                continue
+                    continue
 
             result = {}
             result['repo_id'] = repo.origin_repo_id
@@ -77,7 +61,6 @@ class SharedFolders(APIView):
             result['folder_name'] = repo.name
             result['share_type'] = repo.share_type
             result['share_permission'] = repo.permission
-            result['share_permission_name'] = custom_permission_dict.get(repo.permission, '')
 
             if repo.share_type == 'personal':
                 result['user_name'] = email2nickname(repo.user)
@@ -90,15 +73,10 @@ class SharedFolders(APIView):
                 if not group:
                     if is_org_context(request):
                         seafile_api.org_unshare_subdir_for_group(org_id,
-                                                                 repo.repo_id,
-                                                                 repo.origin_path,
-                                                                 username,
-                                                                 repo.group_id)
+                                repo.repo_id, repo.origin_path, username, repo.group_id)
                     else:
-                        seafile_api.unshare_subdir_for_group(repo.repo_id,
-                                                             repo.origin_path,
-                                                             username,
-                                                             repo.group_id)
+                        seafile_api.unshare_subdir_for_group(
+                                repo.repo_id, repo.origin_path, username, repo.group_id)
                     continue
 
                 result['group_id'] = repo.group_id

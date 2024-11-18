@@ -1,8 +1,6 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import logging
-from types import FunctionType
 
-from django.utils.translation import gettext as _
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -12,13 +10,9 @@ from rest_framework import status
 from constance import config
 from seaserv import ccnet_api, seafile_api
 
-from seahub.settings import INIT_PASSWD, SEND_EMAIL_ON_RESETTING_USER_PASSWD
-from seahub.base.models import UserLastLogin
-from seahub.utils import is_valid_email, is_valid_username, IS_EMAIL_CONFIGURED, \
-    send_html_email, get_site_name
+from seahub.utils import is_valid_email
 from seahub.utils.licenseparse import user_number_over_limit
 from seahub.utils.file_size import get_file_size_unit
-from seahub.auth.utils import get_virtual_id_by_email
 from seahub.base.accounts import User
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
@@ -29,8 +23,6 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.api2.permissions import IsProVersion
 from seahub.api2.endpoints.utils import is_org_user
-from seahub.utils.timeutils import timestamp_to_isoformat_timestr, \
-        datetime_to_isoformat_timestr
 
 try:
     from seahub.settings import ORG_MEMBER_QUOTA_ENABLED
@@ -39,30 +31,21 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-def get_org_user_info(org_id, user_obj):
-    email = user_obj.email
+def get_org_user_info(org_id, email):
     user_info = {}
 
+    user_obj = User.objects.get(email=email)
     user_info['org_id'] = org_id
+    user_info['active'] = user_obj.is_active
     user_info['email'] = email
     user_info['name'] = email2nickname(email)
     user_info['contact_email'] = email2contact_email(email)
 
     org_user_quota = seafile_api.get_org_user_quota(org_id, email)
-    user_info['quota_total'] = org_user_quota
+    user_info['quota_total'] = org_user_quota / get_file_size_unit('MB')
 
     org_user_quota_usage = seafile_api.get_org_user_quota_usage(org_id, email)
-    user_info['quota_usage'] = org_user_quota_usage
-
-    user_info['create_time'] = timestamp_to_isoformat_timestr(user_obj.ctime)
-
-    user_info['last_login'] = ''
-    last_login = UserLastLogin.objects.get_by_username(email).last_login \
-            if UserLastLogin.objects.get_by_username(email) else ''
-    if last_login:
-        user_info['last_login'] = datetime_to_isoformat_timestr(last_login)
-
-    user_info['is_org_staff'] = True if ccnet_api.is_org_staff(org_id, email) == 1 else False
+    user_info['quota_usage'] = org_user_quota_usage / get_file_size_unit('MB')
 
     return user_info
 
@@ -111,46 +94,12 @@ class AdminOrgUsers(APIView):
     throttle_classes = (UserRateThrottle,)
     permission_classes = (IsAdminUser, IsProVersion)
 
-    def get(self, request, org_id):
-        """ Get all users in an org.
-
-        Permission checking:
-        1. only admin can perform this action.
-        """
-
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
-        # argument check
-        org_id = int(org_id)
-        if org_id == 0:
-            error_msg = 'org_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        org = ccnet_api.get_org_by_id(org_id)
-        if not org:
-            error_msg = 'Organization %d not found.' % org_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        result = []
-        org_users = ccnet_api.get_org_emailusers(org.url_prefix, -1, -1)
-        for org_user in org_users:
-            user_info = get_org_user_info(org_id, org_user)
-            user_info['active'] = org_user.is_active
-            result.append(user_info)
-
-        return Response({'users': result})
-
     def post(self, request, org_id):
         """ Add new user to org.
 
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         # argument check
         org_id = int(org_id)
         if org_id == 0:
@@ -172,17 +121,8 @@ class AdminOrgUsers(APIView):
             error_msg = 'password invalid.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-        active = request.POST.get('active', 'true')
-        active = active.lower()
-        if active not in ('true', 'false'):
-            error_msg = 'active invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        is_active = active == 'true'
-
-        vid = get_virtual_id_by_email(email)
         try:
-            User.objects.get(email=vid)
+            User.objects.get(email=email)
             user_exists = True
         except User.DoesNotExist:
             user_exists = False
@@ -199,7 +139,7 @@ class AdminOrgUsers(APIView):
         # check user number limit by org member quota
         org_members = len(ccnet_api.get_org_emailusers(org.url_prefix, -1, -1))
         if ORG_MEMBER_QUOTA_ENABLED:
-            from seahub.organizations.models import OrgMemberQuota
+            from seahub_extra.organizations.models import OrgMemberQuota
             org_members_quota = OrgMemberQuota.objects.get_quota(org_id)
             if org_members_quota is not None and org_members >= org_members_quota:
                 error_msg = 'Failed. You can only invite %d members.' % org_members_quota
@@ -207,8 +147,7 @@ class AdminOrgUsers(APIView):
 
         # create user
         try:
-            user = User.objects.create_user(email, password, is_staff=False,
-                    is_active=is_active)
+            User.objects.create_user(email, password, is_staff=False, is_active=True)
         except User.DoesNotExist as e:
             logger.error(e)
             error_msg = 'Fail to add user %s.' % email
@@ -217,7 +156,7 @@ class AdminOrgUsers(APIView):
         # add user to org
         # set `is_staff` parameter as `0`
         try:
-            ccnet_api.add_org_user(org_id, user.email, 0)
+            ccnet_api.add_org_user(org_id, email, 0)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -225,13 +164,12 @@ class AdminOrgUsers(APIView):
 
         name = request.POST.get('name', None)
         if name:
-            Profile.objects.add_or_update(user.email, name)
+            Profile.objects.add_or_update(email, name)
 
         if config.FORCE_PASSWORD_CHANGE:
-            UserOptions.objects.set_force_passwd_change(user.email)
+            UserOptions.objects.set_force_passwd_change(email)
 
-        user_info = get_org_user_info(org_id, user)
-        user_info['active'] = is_active
+        user_info = get_org_user_info(org_id, email)
         return Response(user_info)
 
 
@@ -249,28 +187,8 @@ class AdminOrgUser(APIView):
         1. only admin can perform this action.
         """
 
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
         # argument check
-        org_id = int(org_id)
-        if org_id == 0:
-            error_msg = 'org_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        org = ccnet_api.get_org_by_id(org_id)
-        if not org:
-            error_msg = 'Organization %d not found.' % org_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        try:
-            user_obj = User.objects.get(email=email)
-        except User.DoesNotExist:
-            error_msg = 'User %s not found.' % email
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        user_info = get_org_user_info(org_id, user_obj)
-        user_info['active'] = user_obj.is_active
+        user_info = get_org_user_info(org_id, email)
         return Response(user_info)
 
     @check_org_user
@@ -281,15 +199,6 @@ class AdminOrgUser(APIView):
         1. only admin can perform this action.
         """
 
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            error_msg = 'User %s not found.' % email
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
         # update active
         active = request.data.get('active', None)
         if active:
@@ -298,6 +207,7 @@ class AdminOrgUser(APIView):
                 error_msg = "active invalid, should be 'true' or 'false'."
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
+            user = User.objects.get(email=email)
             if active == 'true':
                 user.is_active = True
             else:
@@ -356,30 +266,7 @@ class AdminOrgUser(APIView):
 
             seafile_api.set_org_user_quota(org_id, email, user_quota)
 
-        # update is_org_staff
-        is_org_staff = request.data.get("is_org_staff", '')
-        if is_org_staff:
-
-            is_org_staff = is_org_staff.lower()
-            if is_org_staff not in ('true', 'false'):
-                error_msg = 'is_org_staff invalid.'
-                return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-            if is_org_staff == 'true':
-                if ccnet_api.is_org_staff(org_id, email):
-                    error_msg = '%s is already organization staff.' % email
-                    return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-                ccnet_api.set_org_staff(org_id, email)
-            else:
-                if not ccnet_api.is_org_staff(org_id, email):
-                    error_msg = '%s is not organization staff.' % email
-                    return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-                ccnet_api.unset_org_staff(org_id, email)
-
-        user_info = get_org_user_info(org_id, user)
-        user_info['active'] = user.is_active
+        user_info = get_org_user_info(org_id, email)
         return Response(user_info)
 
     @check_org_user
@@ -389,9 +276,6 @@ class AdminOrgUser(APIView):
         Permission checking:
         1. only admin can perform this action.
         """
-
-        if not request.user.admin_permissions.other_permission():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         org = ccnet_api.get_org_by_id(org_id)
         if org.creator == email:

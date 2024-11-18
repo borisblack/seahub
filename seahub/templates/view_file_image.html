@@ -1,0 +1,40 @@
+{% extends 'view_file_base.html' %}
+{% load i18n %}
+
+
+{% block extra_style %}{{block.super}}
+<style type="text/css">
+#file-view { text-align:center; padding:30px 0; position:relative; }
+</style>
+{% endblock %}
+
+{% block file_view_extra_class %}image-file-view{% endblock %}
+
+{% block file_view %}
+    {% if img_prev %}
+    <a href="{% url 'view_lib_file' repo.id img_prev %}" id="img-prev" title="{% trans 'you can also press ← ' %}"><span class="icon-chevron-left"></span></a>
+    {% endif %}
+    {% if img_next %}
+    <a href="{% url 'view_lib_file' repo.id img_next %}" id="img-next" title="{% trans 'you can also press → ' %}"><span class="icon-chevron-right"></span></a>
+    {% endif %}
+
+    <span class="loading-icon"></span>
+    <img src="" alt="{{ filename }}" id="image-view" class="hide" />
+{% endblock %}
+
+{% block extra_script %}{{ block.super }}
+<script type="text/javascript">
+{% if enable_thumbnail and not repo.encrypted and fileext != 'gif' %}
+    var encoded_path = encodePath('{{ path|escapejs }}'); // path: '/Portrait_8.jpg'
+    $('#image-view')
+    .attr('src', '{{ SITE_ROOT }}thumbnail/{{ repo.id }}/{{ thumbnail_size_for_original }}' + encoded_path)
+    .on('error', function() { // fail to load thumbnail
+        $(this).attr('src', '{{ raw_path|escapejs }}');
+    })
+{% else %}
+    $('#image-view').attr('src', '{{ raw_path|escapejs }}');
+{% endif %}
+
+{% include 'snippets/image_file_view_js.html' %}
+</script>
+{% endblock %}

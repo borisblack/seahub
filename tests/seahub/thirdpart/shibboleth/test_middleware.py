@@ -6,12 +6,10 @@ from django.conf import settings
 from django.test import RequestFactory, override_settings
 
 from seahub.base.accounts import User
-from seahub.auth.models import SocialAuthUser
 from seahub.profile.models import Profile
 from seahub.test_utils import BaseTestCase
 from shibboleth import backends
 from shibboleth.middleware import ShibbolethRemoteUserMiddleware
-import importlib
 
 TRAVIS = 'TRAVIS' in os.environ
 
@@ -19,36 +17,28 @@ settings.AUTHENTICATION_BACKENDS += (
     'shibboleth.backends.ShibbolethRemoteUserBackend',
 )
 
-settings.MIDDLEWARE.append(
+settings.MIDDLEWARE_CLASSES += (
     'shibboleth.middleware.ShibbolethRemoteUserMiddleware',
 )
 
-SHIBBOLETH_PROVIDER_IDENTIFIER = getattr(settings, 'SHIBBOLETH_PROVIDER_IDENTIFIER', 'shibboleth')
-
 
 class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
-
-    def get_response(req):
-        from django.http import HttpResponse
-        response = HttpResponse()
-        return response
-
     def setUp(self):
         self.remove_user('sampledeveloper@school.edu')
 
-        self.middleware = ShibbolethRemoteUserMiddleware(self.get_response)
+        self.middleware = ShibbolethRemoteUserMiddleware()
         self.factory = RequestFactory()
         # Create an instance of a GET request.
         self.request = self.factory.get('/sso/')
 
         self.request.user = self.user
-        # self.request.user.is_authenticated = lambda: False
+        self.request.user.is_authenticated = lambda: False
         self.request.cloud_mode = False
         self.request.session = self.client.session
 
         self.request.META = {}
         self.request.META['Shibboleth-eppn'] = 'sampledeveloper@school.edu'
-        self.request.META['HTTP_REMOTE_USER'] = 'sampledeveloper@school.edu'
+        self.request.META['REMOTE_USER'] = 'sampledeveloper@school.edu'
         self.request.META['givenname'] = 'test_gname'
         self.request.META['surname'] = 'test_sname'
         self.request.META['Shibboleth-displayName'] = 'Sample Developer'
@@ -68,20 +58,12 @@ class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
     def test_can_process(self):
         assert len(Profile.objects.all()) == 0
 
-        # logout first
-        from seahub.auth.models import AnonymousUser
-        self.request.session.flush()
-        self.request.user = AnonymousUser()
-
-        # then login user via thibboleth
         self.middleware.process_request(self.request)
-        shib_user = SocialAuthUser.objects.get_by_provider_and_uid(
-            SHIBBOLETH_PROVIDER_IDENTIFIER, 'sampledeveloper@school.edu')
-        assert self.request.user.username == shib_user.username
+        assert self.request.user.username == 'sampledeveloper@school.edu'
 
         assert len(Profile.objects.all()) == 1
         assert self.request.shib_login is True
-        assert Profile.objects.all()[0].user == shib_user.username
+        assert Profile.objects.all()[0].user == 'sampledeveloper@school.edu'
         assert Profile.objects.all()[0].nickname == 'Sample Developer'
 
     @override_settings(SHIBBOLETH_AFFILIATION_ROLE_MAP={
@@ -101,20 +83,12 @@ class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
     def test_can_process_user_role(self):
         assert len(Profile.objects.all()) == 0
 
-        # logout first
-        from seahub.auth.models import AnonymousUser
-        self.request.session.flush()
-        self.request.user = AnonymousUser()
-
-        # then login user via thibboleth
         self.middleware.process_request(self.request)
-        shib_user = SocialAuthUser.objects.get_by_provider_and_uid(
-            SHIBBOLETH_PROVIDER_IDENTIFIER, 'sampledeveloper@school.edu')
-        assert self.request.user.username == shib_user.username
+        assert self.request.user.username == 'sampledeveloper@school.edu'
 
         assert len(Profile.objects.all()) == 1
         assert self.request.shib_login is True
-        assert Profile.objects.all()[0].user == shib_user.username
+        assert Profile.objects.all()[0].user == 'sampledeveloper@school.edu'
         assert Profile.objects.all()[0].nickname == 'Sample Developer'
         assert User.objects.get(self.request.user.username).role == 'staff'
 
@@ -126,14 +100,14 @@ class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
 
         with self.settings(SHIB_ACTIVATE_AFTER_CREATION=False):
             # reload our shibboleth.backends module, so it picks up the settings change
-            importlib.reload(backends)
+            reload(backends)
 
             resp = self.middleware.process_request(self.request)
             assert resp.url == '/shib-complete/'
             assert len(Profile.objects.all()) == 0
 
         # now reload again, so it reverts to original settings
-        importlib.reload(backends)
+        reload(backends)
 
     def test_make_profile_for_display_name(self):
         assert len(Profile.objects.all()) == 0
@@ -193,7 +167,7 @@ class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
         "Shibboleth-displayName": (False, "display_name"),
     })
     def test_get_role_by_affiliation(self):
-        obj = ShibbolethRemoteUserMiddleware(self.get_response)
+        obj = ShibbolethRemoteUserMiddleware()
 
         assert obj._get_role_by_affiliation('employee@school.edu') == 'staff'
         assert obj._get_role_by_affiliation('member@school.edu') == 'staff'
@@ -203,3 +177,4 @@ class ShibbolethRemoteUserMiddlewareTest(BaseTestCase):
         assert obj._get_role_by_affiliation('student1@school.edu') == 'student'
         assert obj._get_role_by_affiliation('a@x.edu') == 'aaa'
         assert obj._get_role_by_affiliation('a@x.com') == 'guest'
+

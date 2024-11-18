@@ -1,8 +1,4 @@
-from seahub.constants import (
-    PERMISSION_PREVIEW, PERMISSION_PREVIEW_EDIT,
-    PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_ADMIN
-)
-from seahub.utils.repo import get_repo_shared_users, get_repo_owner, parse_repo_perm
+from seahub.utils.repo import get_repo_shared_users, get_repo_owner
 from seahub.test_utils import BaseTestCase
 
 import seaserv
@@ -40,43 +36,4 @@ class GetRepoSharedUsersTest(BaseTestCase):
         # user share a repo to group
         seafile_api.set_group_repo(self.repo.id, self.group.id,
                                    username, 'rw')
-        # assert get_repo_shared_users(self.repo.id, owner) == [self.admin.username, self.user2.username]
-        assert len(get_repo_shared_users(self.repo.id, owner)) == 2
-        assert self.admin.username in get_repo_shared_users(self.repo.id, owner)
-        assert self.user2.username in get_repo_shared_users(self.repo.id, owner)
-
-
-class TestParseRepoPerm(BaseTestCase):
-    def test_parse_repo_perm_download(self):
-        assert parse_repo_perm(PERMISSION_ADMIN).can_download is True
-        assert parse_repo_perm(PERMISSION_READ_WRITE).can_download is True
-        assert parse_repo_perm(PERMISSION_READ).can_download is True
-        assert parse_repo_perm(PERMISSION_PREVIEW).can_download is False
-        assert parse_repo_perm(PERMISSION_PREVIEW_EDIT).can_download is False
-
-    def test_parse_repo_perm_upload(self):
-        assert parse_repo_perm(PERMISSION_ADMIN).can_upload is True
-        assert parse_repo_perm(PERMISSION_READ_WRITE).can_upload is True
-        assert parse_repo_perm(PERMISSION_READ).can_upload is False
-        assert parse_repo_perm(PERMISSION_PREVIEW).can_upload is False
-        assert parse_repo_perm(PERMISSION_PREVIEW_EDIT).can_upload is True
-
-    def test_valid_prop(self):
-        assert parse_repo_perm(PERMISSION_READ).can_download is True
-        if parse_repo_perm(PERMISSION_READ).can_download:
-            assert True
-        else:
-            assert False
-
-        assert parse_repo_perm(PERMISSION_PREVIEW).can_download is False
-        if parse_repo_perm(PERMISSION_PREVIEW).can_download:
-            assert False
-        else:
-            assert True
-
-    def test_invalid_prop(self):
-        try:
-            parse_repo_perm(PERMISSION_READ).can_downloadxx
-            assert False
-        except AttributeError:
-            assert True
+        assert get_repo_shared_users(self.repo.id, owner) == [self.admin.username, self.user2.username]

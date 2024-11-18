@@ -1,73 +1,22 @@
-import logging
-import json
-from seahub.group.utils import is_group_admin
-from seahub.constants import PERMISSION_ADMIN, PERMISSION_READ_WRITE, CUSTOM_PERMISSION_PREFIX
-from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission, CustomSharePermissions
+from seahub.group.utils import is_group_member
+from seahub.constants import PERMISSION_ADMIN, PERMISSION_READ_WRITE
+from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.utils import is_valid_org_id
 
 import seaserv
 from seaserv import seafile_api
 
-logger = logging.getLogger(__name__)
-
-
-SCOPE_ALL_USERS = 'all_users'
-SCOPE_SPECIFIC_USERS = 'specific_users'
-SCOPE_SPECIFIC_EMAILS = 'specific_emails'
-
-VALID_SHARE_LINK_SCOPE = [
-    SCOPE_ALL_USERS,
-    SCOPE_SPECIFIC_USERS,
-    SCOPE_SPECIFIC_EMAILS
-]
-
-
-def normalize_custom_permission_name(permission):
-    try:
-        if CUSTOM_PERMISSION_PREFIX in permission:
-            permission = permission.split('-')[1]
-        CustomSharePermissions.objects.get(id=int(permission))
-    except Exception as e:
-        logger.warning(e)
-        return None
-    return CUSTOM_PERMISSION_PREFIX + '-' + str(permission)
-
-
 def is_repo_admin(username, repo_id):
+    is_administrator = ExtraSharePermission.objects.\
+            get_user_permission(repo_id, username) == PERMISSION_ADMIN
+    belong_to_admin_group = False
+    group_ids = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
+    for group_id in group_ids:
+        if is_group_member(group_id, username):
+            belong_to_admin_group = True
+            break
 
-    # repo is shared to user with admin permission
-    try:
-        user_share_permission = ExtraSharePermission.objects. \
-            get_user_permission(repo_id, username)
-        if user_share_permission == PERMISSION_ADMIN:
-            return True
-
-        # get all groups that repo is shared to with admin permission
-        group_ids = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
-        for group_id in group_ids:
-            if is_group_admin(group_id, username):
-                return True
-    except Exception as e:
-        logger.error(e)
-        return False
-
-    repo_owner = seafile_api.get_repo_owner(repo_id) or seafile_api.get_org_repo_owner(repo_id)
-    if not repo_owner:
-        logger.error('repo %s owner is None' % repo_id)
-        return False
-
-    # repo owner
-    if username == repo_owner:
-        return True
-
-    # user is department admin
-    if '@seafile_group' in repo_owner:
-        # is group owned repo
-        group_id = int(repo_owner.split('@')[0])
-        if is_group_admin(group_id, username):
-            return True
-
-    return False
+    return is_administrator or belong_to_admin_group
 
 def share_dir_to_user(repo, path, owner, share_from, share_to, permission, org_id=None):
     # Share  repo or subdir to user with permission(r, rw, admin).
@@ -266,21 +215,3 @@ def has_shared_to_group(repo_id, path, gid, org_id=None):
                                                                    path, repo_owner)
 
     return gid in [item.group_id for item in share_items]
-
-
-def check_share_link_user_access(share, username):
-    if share.user_scope in [SCOPE_ALL_USERS, SCOPE_SPECIFIC_EMAILS]:
-        return True
-    if username == share.username:
-        return True
-    try:
-        authed_details = json.loads(share.authed_details)
-    except:
-        authed_details = {}
-    
-    if share.user_scope == SCOPE_SPECIFIC_USERS:
-        authed_users = authed_details.get('authed_users', [])
-        if username in authed_users:
-            return True
-    
-    return False

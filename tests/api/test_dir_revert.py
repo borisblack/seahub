@@ -1,7 +1,7 @@
 import os
 import json
 from seaserv import seafile_api
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 from seahub.test_utils import BaseTestCase
 
 class DirRevertTest(BaseTestCase):
@@ -20,8 +20,7 @@ class DirRevertTest(BaseTestCase):
 
     def delete_dir(self):
         seafile_api.del_file(self.repo_id, self.parent_dir,
-                             json.dumps([self.folder_name]),
-                             self.username)
+            self.folder_name, self.username)
 
     def get_trash_dir_commit_id(self):
         deleted_file = seafile_api.get_deleted(self.repo_id, 0, '/', None)

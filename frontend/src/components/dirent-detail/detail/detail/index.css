@@ -1,8 +1,0 @@
-.cur-view-detail {
-  display: flex;
-  flex-direction: column;
-  background-color: #fff;
-  height: 100%;
-  border-left: 1px solid #eee;
-  position: relative;
-}

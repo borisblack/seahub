@@ -10,13 +10,9 @@ import logging
 from seaserv import seafile_api
 from pysearpc import SearpcError
 from seahub.utils import is_valid_org_id
-from seahub.settings import ENCRYPTED_LIBRARY_VERSION, \
-        ENCRYPTED_LIBRARY_PWD_HASH_ALGO, ENCRYPTED_LIBRARY_PWD_HASH_PARAMS
-
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
-
 
 class RPCProxy(object):
     def __init__(self, mute=False):
@@ -54,16 +50,10 @@ class RPCWrapper(object):
                              storage_id=None, org_id=None):
         if is_valid_org_id(org_id):
             return seafile_api.org_add_group_owned_repo(
-                org_id, group_id, repo_name, permission, password,
-                enc_version=ENCRYPTED_LIBRARY_VERSION,
-                pwd_hash_algo=ENCRYPTED_LIBRARY_PWD_HASH_ALGO or None,
-                pwd_hash_params=ENCRYPTED_LIBRARY_PWD_HASH_PARAMS or None)
+                org_id, group_id, repo_name, password, permission)
         else:
             return seafile_api.add_group_owned_repo(
-                group_id, repo_name, permission, password,
-                enc_version=ENCRYPTED_LIBRARY_VERSION,
-                pwd_hash_algo=ENCRYPTED_LIBRARY_PWD_HASH_ALGO or None,
-                pwd_hash_params=ENCRYPTED_LIBRARY_PWD_HASH_PARAMS or None,
+                group_id, repo_name, password, permission,
                 storage_id=storage_id)
 
     def delete_group_owned_repo(self, group_id, repo_id, org_id=None):

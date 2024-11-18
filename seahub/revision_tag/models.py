@@ -1,7 +1,7 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 import os
 from django.db import models
-from django.urls import reverse
+from django.core.urlresolvers import reverse
 
 from seahub.base.fields import LowerCaseCharField
 from seahub.base.templatetags.seahub_tags import email2nickname, email2contact_email
@@ -78,7 +78,7 @@ class RevisionTags(models.Model):
         if not repo:
             return None
         commit = seaserv.get_commit(repo.id, repo.revision, self.revision_id)
-        email = getattr(commit, 'creator_name', '')
+        email = commit.creator_name
         return  {"tag":self.tag.name,
                  "tag_creator": self.username,
                  "revision": {
